@@ -59,6 +59,29 @@ def PhotometricDistort(img, target,
 
     return img, target
 
-def expand(img, target,
-           mean = (0,0,0),
-           to_rgb=True):
+def expand(img, target, mean,
+           to_rgb=True,
+           expand_ratio=(1,4)):
+    if random.randint(2):
+        return img, target
+    if to_rgb:
+        mean = mean[::-1]
+    h,w,c = img.shape
+    ratio = random.uniform(expand_ratio)
+    ex_img = np.full((int(h*ratio), int(w*ratio),c),mean,dtpye=img.dtype)
+    left = int(random.uniform(0,w*(ratio-1)))
+    top = int(random.uniform(0,h*(ratio-1)))
+    ex_img[top:h+top, left:left+w] = img
+
+    bboxes = target[0]
+    bboxes[:,0::2] += left
+    bboxes[:,1::2] += top
+
+    return img, (bboxes, target[1])
+
+def normalize(img, target,
+              mean=[127,127,127],
+              std=[1,1,1],
+              to_rgb=True):
+    if to_rgb:
+        mean=mean[::-1]

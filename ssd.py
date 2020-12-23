@@ -56,6 +56,7 @@ class ssd(vgg16):
         """
         if isinstance(pretrained, str):
             load_checkpoint(self, pretrained, strict=False, logger=None)
+            print('load pretrained checkpoint from {}'.format(pretrained))
         elif pretrained is None:
             for m in self.features.modules():
                 if isinstance(m, nn.Conv2d):
