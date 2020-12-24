@@ -118,9 +118,30 @@ class ssd_header(nn.Module):
                                                           self.gen_scales[i]))
         return mulit_feat
 
+    def grid_anchors(self):
+        """
+        :argument:
+            self.base_anchors: List[Tensor]
+            self.anchor_strides: List[int]
+        :return:
+        """
+        featuremap_size = [int(np.ceil(self.anchor_input_size / i)) for i in self.anchor_strides]
+        multi_grid_anchors = []
+        for num_levels in range(len(self.base_anchors)):
+            x = torch.from_numpy(np.array(
+                range(0, self.anchor_input_size, self.anchor_strides[num_levels])))
+            y = torch.from_numpy(np.array(
+                range(0, self.anchor_input_size, self.anchor_strides[num_levels])))
 
-
-
-
+    def shift(self,x,y):
+        """
+        :param x: Tensor, w of featmap
+        :param y: int, h of featmap
+        :return: shift: Tensor, w*h
+        """
+        x_ = x.repeat(len(y)).view(-1)
+        y_ = y.view(-1,1).repeat(1,len(x)).view(-1)
+        shift = [x_, y_, x_, y_]
+        shift = torch.stack(shift, )
 
 
