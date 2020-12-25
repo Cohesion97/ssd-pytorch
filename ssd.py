@@ -45,7 +45,7 @@ class ssd(vgg16):
                         nn.Conv2d(128, 256, kernel_size=3),
                         ]
         self.add_module('extra',nn.Sequential(*extra_layers))
-        self.l2_norm = L2Norm(self.features[out_indices[0]-1].out_channels, l2_norm_scale)
+        self.l2_norm = L2Norm(self.features[out_feat_indices[0]-1].out_channels, l2_norm_scale)
 
     def init_weights(self, pretrained=None):
         """Initialize the weights in backbone.

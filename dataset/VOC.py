@@ -5,7 +5,7 @@ from PIL import Image
 import torch
 import cv2
 import torch.utils.data.dataset as dataset
-
+from functools import partial
 from .transform import *
 
 class VOC(dataset):
@@ -18,7 +18,20 @@ class VOC(dataset):
     def __init__(self,
                  dataset_path,
                  use_set = 'train',
-                 transforms = None,
+                 transforms = [partial(PhotometricDistort(),delta=32,
+                                       contrast_range=(0.5,1.5),
+                                       saturation_range=(0.5,1.5),
+                                       hue_delta=18),
+                               partial(expand(),
+                                       mean=[123.675, 116.28, 103.53],
+                                       to_rgb=True,
+                                       expand_ratio=(1,4)),
+                               partial(resize(),resize_size=(300,300), keep_ratio=False),
+                               partial(normalize(),mean=[127,127,127],
+                                       std=[1,1,1],
+                                       to_rgb=True),
+                               partial(flip_random(),)
+                               ],
                  to_rgb = True):
         self.datase_path =dataset_path
         self.use_set = use_set
@@ -55,8 +68,8 @@ class VOC(dataset):
         if self.transforms is not None:
             for t in self.transforms:
                 img, anno = t(img, anno)
-        bboxes = anno['bboxes']
-        labels = anno['labels']
+        bboxes = anno[0]
+        labels = anno[1]
 
         if self.to_rgb:
             img = img[:,:,(2,1,0)]
@@ -88,5 +101,4 @@ class VOC(dataset):
         if not bboxes:
             bboxes = np.zeros((0,4))
             labels = np.zeros((0,))
-        return dict(bboxes=bboxes.astype(np.float32),
-                    labels=labels.astype(np.int64))
+        return (bboxes, labels)
