@@ -4,11 +4,20 @@ import numpy as np
 from PIL import Image
 import torch
 import cv2
-import torch.utils.data.dataset as dataset
+from torch.utils.data import Dataset
 from functools import partial
 from .transform import *
 
-class VOC(dataset):
+class Compose(object):
+    def __init__(self, transforms):
+        self.transforms = transforms
+
+    def __call__(self, img, target=None):
+        for t in self.transforms:
+            img, target = t(img, target)
+        return img, target
+
+class VOC(Dataset):
 
     CLASSES = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
                'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse',
@@ -18,20 +27,12 @@ class VOC(dataset):
     def __init__(self,
                  dataset_path,
                  use_set = 'train',
-                 transforms = [partial(PhotometricDistort(),delta=32,
-                                       contrast_range=(0.5,1.5),
-                                       saturation_range=(0.5,1.5),
-                                       hue_delta=18),
-                               partial(expand(),
-                                       mean=[123.675, 116.28, 103.53],
-                                       to_rgb=True,
-                                       expand_ratio=(1,4)),
-                               partial(resize(),resize_size=(300,300), keep_ratio=False),
-                               partial(normalize(),mean=[127,127,127],
-                                       std=[1,1,1],
-                                       to_rgb=True),
-                               partial(flip_random(),)
-                               ],
+                 transforms = Compose([PhotometricDistort(),
+                               expand(),
+                               resize(),
+                               normalize(),
+                               flip_random(),
+                               MinIoURandomCrop()]),
                  to_rgb = True):
         self.datase_path =dataset_path
         self.use_set = use_set
@@ -40,7 +41,7 @@ class VOC(dataset):
         self.cat2label = {cat: i for i, cat in enumerate(self.CLASSES)}
 
         self.jpg_dir = osp.join(dataset_path, 'JPEGImages', '%s.jpg')
-        self.anno_dir = osp.join(dataset_path, 'Annotations', '%s')
+        self.anno_dir = osp.join(dataset_path, 'Annotations', '%s.xml')
         self.ids = list()
         for line in open(osp.join(dataset_path,'ImageSets',
                                   'Main',use_set+'.txt')):
@@ -61,20 +62,20 @@ class VOC(dataset):
         jpg_name = self.jpg_dir % img_id
 
         img = cv2.imread(jpg_name)
+        img = img.astype(np.float32)
         h, w, c = img.shape
 
         anno = self.get_anno(xml_name)
 
         if self.transforms is not None:
-            for t in self.transforms:
-                img, anno = t(img, anno)
+            img, anno = self.transforms(img, anno)
         bboxes = anno[0]
         labels = anno[1]
 
         if self.to_rgb:
             img = img[:,:,(2,1,0)]
 
-        return img, (bboxes, labels)
+        return torch.from_numpy(img), (torch.from_numpy(bboxes), torch.from_numpy(labels))
 
     def get_anno(self,xml_name):
         tree = ET.parse(xml_name)
@@ -101,4 +102,5 @@ class VOC(dataset):
         if not bboxes:
             bboxes = np.zeros((0,4))
             labels = np.zeros((0,))
-        return (bboxes, labels)
+
+        return (np.array(bboxes), np.array(labels))

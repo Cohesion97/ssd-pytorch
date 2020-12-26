@@ -1,123 +1,218 @@
 import torch
 import numpy as np
 import cv2
-import random
+from numpy import random
+from np_bbox_overlaps import bbox_overlaps
 
-def resize(img, target, resize_size=(300,300), keep_ratio=False):
-    if not keep_ratio:
-        h, w = img.shape[:2]
-        img = cv2.resize(img, resize_size, interpolation='bilinear')
-        w_scale = resize_size[0]/w
-        h_scale = resize_size[1]/h
+class resize(object):
+    def __init__(self, resize_size=(300,300), keep_ratio=False):
+        self.resize_size = resize_size
+        self.keep_ratio = keep_ratio
 
-        bboxes = target[0]
-        bboxes[:, 0::2] = np.clip(bboxes[:,0::2], 0, resize_size[0]) # width
-        bboxes[:, 1::2] = np.clip(bboxes[:,1::2], 0, resize_size[1]) # height
-    return img, (bboxes, target[1])
+    def __call__(self, img, target=None):
+        keep_ratio = self.keep_ratio
+        resize_size = self.resize_size
+        if not keep_ratio:
+            h, w = img.shape[:2]
+            img = cv2.resize(img, resize_size, interpolation='bilinear')
+            w_scale = resize_size[0]/w
+            h_scale = resize_size[1]/h
 
-def PhotometricDistort(img, target,
-                       delta=32,
+            bboxes = target[0]
+            bboxes[:, 0::2] = np.clip(bboxes[:,0::2], 0, resize_size[0]) # width
+            bboxes[:, 1::2] = np.clip(bboxes[:,1::2], 0, resize_size[1]) # height
+        return img, (bboxes, target[1])
+
+class PhotometricDistort(object):
+    def __init__(self,delta=32,
                        contrast_range=(0.5,1.5),
                        saturation_range=(0.5,1.5),
                        hue_delta=18):
-    assert delta>=0.
-    assert delta<=255.0
-    contrast_first = random.uniform(2)
+        self.delta = delta
+        self.contrast_range = contrast_range
+        self.saturation_range = saturation_range
+        self.hue_delta = hue_delta
 
+    def __call__(self, img, target):
 
-    #brightness
-    if random.randint(2):
-        d = random.uniform(-delta, delta)
-        img += d
+        assert self.delta>=0.
+        assert self.delta<=255.0
+        contrast_first = random.randint(2)
 
-    if contrast_first:
+        img = img.copy()
+        #brightness
         if random.randint(2):
-            alpha = random.uniform(contrast_range[0],
-                                   contrast_range[1])
-            img *= alpha
+            d = random.uniform(-self.delta, self.delta)
+            img += d
 
-    #saturation
-    img = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+        if contrast_first:
+            if random.randint(2):
+                alpha = random.uniform(self.contrast_range[0],
+                                       self.contrast_range[1])
+                img *= alpha
 
-    if random.randint(2):
-        a = random.uniform(saturation_range[0],
-                           saturation_range[1])
-        img *= a
-    #hue
-    if random.randint(2):
-        img[..., 0] += random.uniform(-hue_delta, hue_delta)
-        img[..., 0][img[..., 0] > 360] -= 360
-        img[..., 0][img[..., 0] < 0] += 360
+        #saturation
+        img = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
 
-    img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
-    #contrast
-    if not contrast_first:
         if random.randint(2):
-            alpha = random.uniform(contrast_range[0],
-                                   contrast_range[1])
-            img *=alpha
+            a = random.uniform(self.saturation_range[0],
+                               self.saturation_range[1])
+            img *= a
+        #hue
+        if random.randint(2):
+            img[..., 0] += random.uniform(-self.hue_delta, self.hue_delta)
+            img[..., 0][img[..., 0] > 360] -= 360
+            img[..., 0][img[..., 0] < 0] += 360
 
-    return img, target
+        img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
+        #contrast
+        if not contrast_first:
+            if random.randint(2):
+                alpha = random.uniform(self.contrast_range[0],
+                                       self.contrast_range[1])
+                img *=alpha
 
-def expand(img, target, mean,
+        return img, target
+
+class expand(object):
+    def __init__(self,mean=(0,0,0),
            to_rgb=True,
            expand_ratio=(1,4)):
-    if random.randint(2):
-        return img, target
-    if to_rgb:
-        mean = mean[::-1]
-    h,w,c = img.shape
-    ratio = random.uniform(expand_ratio)
-    ex_img = np.full((int(h*ratio), int(w*ratio),c),mean,dtpye=img.dtype)
-    left = int(random.uniform(0,w*(ratio-1)))
-    top = int(random.uniform(0,h*(ratio-1)))
-    ex_img[top:h+top, left:left+w] = img
+        self.to_rgb = to_rgb
+        self.expand_ratio = expand_ratio
+        self.mean = mean
 
-    bboxes = target[0]
-    bboxes[:,0::2] += left
-    bboxes[:,1::2] += top
-
-    return img, (bboxes, target[1])
-
-def normalize(img, target,
-              mean=[127,127,127],
-              std=[1,1,1],
-              to_rgb=True):
-    img = img.copy().astype(np.float32)
-    mean = np.float64(np.array(mean,dtype=np.float32).reshape(1,-1))
-    std = 1 / np.float64(np.array(std, dtype=np.float32).reshape(1, -1))
-    if to_rgb:
-        cv2.cvtColor(img, cv2.COLOR_BGR2RGB, img)
-    cv2.subtract(img, mean, img)  # inplace
-    cv2.multiply(img, std, img)
-    return img, target
-
-def flip_random(img, target, flip_ratio=0.5, direction='horizontal'):
-    assert direction in ['horizontal', 'vertical', 'diagonal']
-    if random.uniform(0, 1) > flip_ratio:
-        if direction=='horizontal':
-            img = np.flip(img, axis=1)
-        elif direction=='vertical':
-            img = np.flip(img, axis=0)
-        elif direction=='diagonal':
-            img = np.flip(img, axis=(0,1))
+    def __call__(self, img, target = None):
+        if random.randint(2):
+            return img, target
+        if self.to_rgb:
+            mean = self.mean[::-1]
+        h,w,c = img.shape
+        ratio = random.uniform(self.expand_ratio)
+        ex_img = np.full((int(h*ratio), int(w*ratio),c),mean,dtpye=img.dtype)
+        left = int(random.uniform(0,w*(ratio-1)))
+        top = int(random.uniform(0,h*(ratio-1)))
+        ex_img[top:h+top, left:left+w] = img
 
         bboxes = target[0]
-        flipped = bboxes.copy()
-        img_shape = img.shape
-        if direction == 'horizontal':
-            w = img_shape[1]
-            flipped[..., 0::4] = w - bboxes[..., 2::4]
-            flipped[..., 2::4] = w - bboxes[..., 0::4]
-        elif direction == 'vertical':
-            h = img_shape[0]
-            flipped[..., 1::4] = h - bboxes[..., 3::4]
-            flipped[..., 3::4] = h - bboxes[..., 1::4]
-        elif direction == 'diagonal':
-            w = img_shape[1]
-            h = img_shape[0]
-            flipped[..., 0::4] = w - bboxes[..., 2::4]
-            flipped[..., 1::4] = h - bboxes[..., 3::4]
-            flipped[..., 2::4] = w - bboxes[..., 0::4]
-            flipped[..., 3::4] = h - bboxes[..., 1::4]
-    return img, (bboxes, target[1])
+        bboxes[:,0::2] += left
+        bboxes[:,1::2] += top
+
+        return img, (bboxes, target[1])
+
+class normalize(object):
+    def __init__(self,mean=[127,127,127],
+              std=[1,1,1],
+              to_rgb=True):
+        self.mean = mean
+        self.std = std
+        self.to_rgb = to_rgb
+
+    def __call__(self, img, target=None):
+        img = img.copy().astype(np.float32)
+        mean = np.float64(np.array(self.mean,dtype=np.float32).reshape(1,-1))
+        std = 1 / np.float64(np.array(self.std, dtype=np.float32).reshape(1, -1))
+        if self.to_rgb:
+            cv2.cvtColor(img, cv2.COLOR_BGR2RGB, img)
+        cv2.subtract(img, mean, img)  # inplace
+        cv2.multiply(img, std, img)
+        return img, target
+
+class flip_random(object):
+    def __init__(self, flip_ratio=0.5, direction='horizontal'):
+        self.flip_ratio = flip_ratio
+        self.direction = direction
+
+    def __call__(self, img, target=None):
+        direction = self.direction
+        flip_ratio = self.flip_ratio
+        assert direction in ['horizontal', 'vertical', 'diagonal']
+        if random.uniform(0, 1) > flip_ratio:
+            if direction=='horizontal':
+                img = np.flip(img, axis=1)
+            elif direction=='vertical':
+                img = np.flip(img, axis=0)
+            elif direction=='diagonal':
+                img = np.flip(img, axis=(0,1))
+
+            bboxes = target[0]
+            flipped = bboxes.copy()
+            img_shape = img.shape
+            if direction == 'horizontal':
+                w = img_shape[1]
+                flipped[..., 0::4] = w - bboxes[..., 2::4]
+                flipped[..., 2::4] = w - bboxes[..., 0::4]
+            elif direction == 'vertical':
+                h = img_shape[0]
+                flipped[..., 1::4] = h - bboxes[..., 3::4]
+                flipped[..., 3::4] = h - bboxes[..., 1::4]
+            elif direction == 'diagonal':
+                w = img_shape[1]
+                h = img_shape[0]
+                flipped[..., 0::4] = w - bboxes[..., 2::4]
+                flipped[..., 1::4] = h - bboxes[..., 3::4]
+                flipped[..., 2::4] = w - bboxes[..., 0::4]
+                flipped[..., 3::4] = h - bboxes[..., 1::4]
+        return img, (bboxes, target[1])
+
+class MinIoURandomCrop(object):
+    def __init__(self, min_ious=(0.1, 0.3, 0.5, 0.7, 0.9),
+                 min_crop_size=0.3,
+                 bbox_clip_border=True):
+        self.min_ious = min_ious
+        self.min_crop_size = min_crop_size
+        self.bbox_clip_border = bbox_clip_border
+
+    def __call__(self, img, target=None):
+        min_ious = self.min_ious
+        min_crop_size = self.min_crop_size
+        bbox_clip_border = self.bbox_clip_border
+        iou_select = (1,0, *min_ious)
+        bboxes = target[0]
+        labels = target[1]
+
+        h, w, c = img.shape
+
+        mode = random.choice(iou_select)
+        if mode == 1:
+            return img, target
+
+        min_iou = mode
+        for i in range(50):
+            n_w = random.uniform(min_crop_size * w, w)
+            n_h = random.uniform(min_crop_size * h, h)
+
+            if n_w / n_h < 0.5 or n_w / n_h > 2:
+                continue
+
+            left = random.uniform(w - n_w)
+            top = random.uniform(h - n_h)
+
+            patch = np.array([int(left), int(top), int(left+n_w), int(top+n_h)])
+
+            if patch[0]==patch[2] or patch[1]==patch[3]:
+                continue
+            overlaps = bbox_overlaps(patch, bboxes).reshape(-1)
+            if len(overlaps)>0 and overlaps.min() < min_iou:
+                continue
+
+            if len(overlaps)>0:
+                center = (bboxes[:, :2] + bboxes[:, 2:]) / 2
+                mask = ((center[:, 0] > patch[0]) *
+                        (center[:, 1] > patch[1]) *
+                        (center[:, 0] < patch[2]) *
+                        (center[:, 1] < patch[3]))
+
+                if not mask.any():
+                    continue
+                bboxes_copy = bboxes.copy()
+                bboxes_copy = bboxes_copy[mask,:]
+                labels_copy = labels.copy()[mask]
+                if bbox_clip_border:
+                    bboxes_copy[:, 2:] = bboxes_copy[:, 2:].clip(max=patch[2:])
+                    bboxes_copy[:, :2] = bboxes_copy[:, :2].clip(min=patch[:2])
+                bboxes_copy -= np.tile(patch[:2], 2)
+                img = img[patch[1]:patch[3],patch[0]:patch[2]]
+
+                return img, (bboxes_copy, labels_copy)
+
