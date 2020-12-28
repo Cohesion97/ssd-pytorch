@@ -14,11 +14,12 @@ class resize(object):
         resize_size = self.resize_size
         if not keep_ratio:
             h, w = img.shape[:2]
-            img = cv2.resize(img, resize_size, interpolation='bilinear')
+            img = cv2.resize(img, resize_size,)
             w_scale = resize_size[0]/w
             h_scale = resize_size[1]/h
-
             bboxes = target[0]
+            scale_factor = np.array([w_scale,h_scale,w_scale,h_scale],dtype=np.float32)
+            bboxes = bboxes * scale_factor
             bboxes[:, 0::2] = np.clip(bboxes[:,0::2], 0, resize_size[0]) # width
             bboxes[:, 1::2] = np.clip(bboxes[:,1::2], 0, resize_size[1]) # height
         return img, (bboxes, target[1])
@@ -75,7 +76,7 @@ class PhotometricDistort(object):
         return img, target
 
 class expand(object):
-    def __init__(self,mean=(0,0,0),
+    def __init__(self,mean=(123.675, 116.28, 103.53),
            to_rgb=True,
            expand_ratio=(1,4)):
         self.to_rgb = to_rgb
@@ -88,8 +89,9 @@ class expand(object):
         if self.to_rgb:
             mean = self.mean[::-1]
         h,w,c = img.shape
-        ratio = random.uniform(self.expand_ratio)
-        ex_img = np.full((int(h*ratio), int(w*ratio),c),mean,dtpye=img.dtype)
+        ratio = random.uniform(*self.expand_ratio)
+        #from IPython import embed;embed()
+        ex_img = np.full((int(h*ratio), int(w*ratio),c),mean,dtype=img.dtype)
         left = int(random.uniform(0,w*(ratio-1)))
         top = int(random.uniform(0,h*(ratio-1)))
         ex_img[top:h+top, left:left+w] = img
@@ -98,10 +100,10 @@ class expand(object):
         bboxes[:,0::2] += left
         bboxes[:,1::2] += top
 
-        return img, (bboxes, target[1])
+        return ex_img, (bboxes, target[1])
 
 class normalize(object):
-    def __init__(self,mean=[127,127,127],
+    def __init__(self,mean=[123.675, 116.28, 103.53],
               std=[1,1,1],
               to_rgb=True):
         self.mean = mean
@@ -153,7 +155,9 @@ class flip_random(object):
                 flipped[..., 1::4] = h - bboxes[..., 3::4]
                 flipped[..., 2::4] = w - bboxes[..., 0::4]
                 flipped[..., 3::4] = h - bboxes[..., 1::4]
-        return img, (bboxes, target[1])
+            return img, (bboxes, target[1])
+        else:
+            return img, target
 
 class MinIoURandomCrop(object):
     def __init__(self, min_ious=(0.1, 0.3, 0.5, 0.7, 0.9),
@@ -172,47 +176,53 @@ class MinIoURandomCrop(object):
         labels = target[1]
 
         h, w, c = img.shape
+        while True:
+            mode = random.choice(iou_select)
+            if mode == 1:
+                return img, target
 
-        mode = random.choice(iou_select)
-        if mode == 1:
-            return img, target
+            min_iou = mode
+            for i in range(50):
+                n_w = random.uniform(min_crop_size * w, w)
+                n_h = random.uniform(min_crop_size * h, h)
 
-        min_iou = mode
-        for i in range(50):
-            n_w = random.uniform(min_crop_size * w, w)
-            n_h = random.uniform(min_crop_size * h, h)
-
-            if n_w / n_h < 0.5 or n_w / n_h > 2:
-                continue
-
-            left = random.uniform(w - n_w)
-            top = random.uniform(h - n_h)
-
-            patch = np.array([int(left), int(top), int(left+n_w), int(top+n_h)])
-
-            if patch[0]==patch[2] or patch[1]==patch[3]:
-                continue
-            overlaps = bbox_overlaps(patch, bboxes).reshape(-1)
-            if len(overlaps)>0 and overlaps.min() < min_iou:
-                continue
-
-            if len(overlaps)>0:
-                center = (bboxes[:, :2] + bboxes[:, 2:]) / 2
-                mask = ((center[:, 0] > patch[0]) *
-                        (center[:, 1] > patch[1]) *
-                        (center[:, 0] < patch[2]) *
-                        (center[:, 1] < patch[3]))
-
-                if not mask.any():
+                if n_w / n_h < 0.5 or n_w / n_h > 2:
                     continue
-                bboxes_copy = bboxes.copy()
-                bboxes_copy = bboxes_copy[mask,:]
-                labels_copy = labels.copy()[mask]
-                if bbox_clip_border:
-                    bboxes_copy[:, 2:] = bboxes_copy[:, 2:].clip(max=patch[2:])
-                    bboxes_copy[:, :2] = bboxes_copy[:, :2].clip(min=patch[:2])
-                bboxes_copy -= np.tile(patch[:2], 2)
-                img = img[patch[1]:patch[3],patch[0]:patch[2]]
 
-                return img, (bboxes_copy, labels_copy)
+                left = random.uniform(w - n_w)
+                top = random.uniform(h - n_h)
 
+                patch = np.array([int(left), int(top), int(left+n_w), int(top+n_h)])
+
+                if patch[0]==patch[2] or patch[1]==patch[3]:
+                    continue
+                overlaps = bbox_overlaps(patch, bboxes).reshape(-1)
+                if len(overlaps)>0 and overlaps.min() < min_iou:
+                    continue
+
+                if len(overlaps)>0:
+                    center = (bboxes[:, :2] + bboxes[:, 2:]) / 2
+                    mask = ((center[:, 0] > patch[0]) *
+                            (center[:, 1] > patch[1]) *
+                            (center[:, 0] < patch[2]) *
+                            (center[:, 1] < patch[3]))
+
+                    if not mask.any():
+                        continue
+                    bboxes_copy = bboxes.copy()
+                    bboxes_copy = bboxes_copy[mask,:]
+                    labels_copy = labels.copy()[mask]
+                    if bbox_clip_border:
+                        bboxes_copy[:, 2:] = bboxes_copy[:, 2:].clip(max=patch[2:])
+                        bboxes_copy[:, :2] = bboxes_copy[:, :2].clip(min=patch[:2])
+                    bboxes_copy -= np.tile(patch[:2], 2)
+                    img = img[patch[1]:patch[3],patch[0]:patch[2]]
+
+                    return img, (bboxes_copy, labels_copy)
+
+class DefualtFormat(object):
+    def __call__(self, img, target):
+        # h,w,c->c,h,w
+
+        img = np.ascontiguousarray(img.transpose(2, 0, 1))
+        return img, target

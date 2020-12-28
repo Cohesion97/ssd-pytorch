@@ -1,8 +1,6 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from ssd import ssd
-from smooth_l1_loss import smooth_l1_loss
+from losses.smooth_l1_loss import smooth_l1_loss
 from init_weights import *
 from IoU_assign import IoU_assigner
 from functools import partial
@@ -118,6 +116,8 @@ class ssd_header(nn.Module):
         self.loc_convs = nn.ModuleList(loc_convs)
         self.cla_convs = nn.ModuleList(cla_convs)
 
+        #from IPython import embed;embed()
+
 
     def forward(self,feats):
         cla_scores = []
@@ -156,7 +156,7 @@ class ssd_header(nn.Module):
         index = list(range(len(ratios)+1))
         return torch.index_select(anchors,0,torch.LongTensor(index))
 
-    def gen_anchor_single_img(self,):
+    def gen_anchor_single_img(self,device='cuda'):
         mulit_feat = []
         for i in range(len(self.base_len)):
             mulit_feat.append(self.gen_anchor_single_feat(pairs(self.base_len[i]),
@@ -165,7 +165,7 @@ class ssd_header(nn.Module):
                                                           self.gen_scales[i]))
         return mulit_feat
 
-    def grid_anchors(self,clamp=False):
+    def grid_anchors(self,clamp=False,device='cuda'):
         """
         :argument:
             self.base_anchors: List[Tensor]
@@ -176,11 +176,11 @@ class ssd_header(nn.Module):
         multi_grid_anchors = []
         for num_levels in range(len(self.base_anchors)):
             x = torch.from_numpy(np.array(
-                range(0, self.anchor_input_size, self.anchor_strides[num_levels])))
+                range(0, self.anchor_input_size, self.anchor_strides[num_levels]))).to(device)
             y = torch.from_numpy(np.array(
-                range(0, self.anchor_input_size, self.anchor_strides[num_levels])))
+                range(0, self.anchor_input_size, self.anchor_strides[num_levels]))).to(device)
             shift_ = self.shift(x,y)
-            shift_anchors = self.base_anchors[num_levels][None:,:,:]+shift_[:,None,:]
+            shift_anchors = self.base_anchors[num_levels].to(device)[None,:,:]+shift_[:,None,:]
             shift_anchors = shift_anchors.view(-1,4)
             if clamp:
                 shift_anchors = shift_anchors.clamp(min=0,max=300)
@@ -203,18 +203,18 @@ class ssd_header(nn.Module):
     def match_(self, anchors_list, gt_bboxes, gt_labels, batch_size):
         """
         match anchors with gt_bboxes in a batch of imgs
-        :param anchors_list: list[Tensor: num_levels, featmap_size, 4]
+        :param anchors_list: list[list[Tensor: num_levels, featmap_size, 4]]
         :param gt_bboxes: list[Tensor]
         :param gt_labels: list[Tensor]
         :return:
         """
-        num_anchors_level = [anchors.shape[0] for anchors in anchors_list]
+        num_anchors_level = [anchors.size(0) for anchors in anchors_list[0]]
         concat_anchor_list = []
 
         for i in range(batch_size):
             concat_anchor_list.append(torch.cat(anchors_list[i])) # list[Tensor: num_total_anchors, 4]
 
-        result = multi_apply(self.match_single_img, anchors_list, gt_bboxes, gt_labels, batch_size)
+        result = multi_apply(self.match_single_img, concat_anchor_list, gt_bboxes, gt_labels, batch_size=batch_size)
         (all_labels, all_bbox_targets, all_pos_idx, all_neg_idx) = result
 
         num_pos_total = sum([inds.numel() for inds in all_pos_idx])
@@ -226,7 +226,7 @@ class ssd_header(nn.Module):
         return (labels_list, bboxes_target_list, num_pos_total, num_neg_total)
 
 
-    def match_single_img(self, anchors, gt_bboxes, gt_labels, batch_size):
+    def match_single_img(self, anchors, gt_bboxes, gt_labels, batch_size=4):
         """
         match anchors with gt_bboxes in one img
         :param anchors: Tensor: num_anchors, 4
@@ -251,7 +251,7 @@ class ssd_header(nn.Module):
         labels = anchors.new_full(
             (anchors.shape[0], ), self.num_classes , dtype=torch.long) #(num_anchors, )
 
-        if pos_idx > 0:
+        if len(pos_idx) > 0:
             pos_bbox_targets = self.bbox_encoder(pos_bboxs,pos_gt)
             bbox_targets[pos_idx, :] = pos_bbox_targets
             if gt_labels is not None:
@@ -291,7 +291,7 @@ class ssd_header(nn.Module):
         d = d.sub_(means).div_(stds)
         return d # [num_anchors, 4]
 
-    def loss(self, cla_scores, loc_results, gt_bboxes, gt_labels, batch_size):
+    def loss(self, cla_scores, loc_results, gt_bboxes, gt_labels,):
         """
         :param cla_scores: list[Tensor] (B, num_anchor*num_classes+1, h, w)
         :param loc_results: list[Tensor] (B, num_anchor*4, h, w)
@@ -299,14 +299,16 @@ class ssd_header(nn.Module):
         :param gt_labels: list[Tensor]
         :return:
         """
-        anchors_list = self.grid_anchors() # list[Tensor: num_levels, featmap_size, 4]
+        multi_level_anchors = self.grid_anchors() # list[Tensor: num_levels, featmap_size, 4]
+        batch_size =  cla_scores[0].shape[0]
+        anchors_list =[multi_level_anchors for _ in range(batch_size)]
 
         (labels_list, bboxes_target_list, num_pos_total, num_neg_total) = self.match_(
             anchors_list, gt_bboxes, gt_labels, batch_size)
         num_total_samples = num_neg_total + num_pos_total
         all_cla_scores = torch.cat([
             s.permute(0, 2, 3, 1).reshape(
-                batch_size, -1, self.cls_out_channels) for s in cla_scores
+                batch_size, -1, self.num_classes+1) for s in cla_scores
         ], 1)
 
         all_bbox_preds = torch.cat([
@@ -345,8 +347,8 @@ class ssd_header(nn.Module):
         loss_cla_all = F.cross_entropy(cla_scores, labels, reduction='none')
         # foreground: [0,num_class-1]; background: num_class
         pos_inds = ((labels >= 0) &
-                    (labels < self.num_classes)).nonzero().reshape(-1)
-        neg_inds = (labels == self.num_classes).nonzero().view(-1)
+                    (labels < self.num_classes)).nonzero(as_tuple=False).reshape(-1)
+        neg_inds = (labels == self.num_classes).nonzero(as_tuple=False).view(-1)
         num_pos_samples = pos_inds.size(0)
         num_neg_samples = self.neg_pos_rate * num_pos_samples
         if num_neg_samples > neg_inds.size(0):

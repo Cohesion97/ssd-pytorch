@@ -7,8 +7,13 @@ def bbox_overlaps(bbox1, bbox2, eps=1e-6):
     :param eps:
     :return: overlaps: np.array n,k
     """
-    rows = bbox1[0]
-    cols = bbox2[1]
+
+    try:
+        _ = bbox1.shape[1]
+    except:
+        bbox1 = bbox1.reshape(-1,4)
+    rows = bbox1.shape[0]
+    cols = bbox2.shape[0]
     bboxes1 = bbox1.astype(np.float32)
     bboxes2 = bbox2.astype(np.float32)
     ious = np.zeros((rows, cols), dtype=np.float32)

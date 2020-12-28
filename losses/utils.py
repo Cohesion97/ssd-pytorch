@@ -1,6 +1,5 @@
-import torch
-import torch.nn as nn
 import functools
+
 import torch.nn.functional as F
 
 
@@ -23,7 +22,19 @@ def reduce_loss(loss, reduction):
     elif reduction_enum == 2:
         return loss.sum()
 
+
 def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
+    """Apply element-wise weight and reduce loss.
+
+    Args:
+        loss (Tensor): Element-wise loss.
+        weight (Tensor): Element-wise weights.
+        reduction (str): Same as built-in losses of PyTorch.
+        avg_factor (float): Avarage factor when computing the mean of losses.
+
+    Returns:
+        Tensor: Processed loss values.
+    """
     # if weight is specified, apply element-wise weight
     if weight is not None:
         loss = loss * weight
@@ -42,6 +53,36 @@ def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
 
 
 def weighted_loss(loss_func):
+    """Create a weighted version of a given loss function.
+
+    To use this decorator, the loss function must have the signature like
+    `loss_func(pred, target, **kwargs)`. The function only needs to compute
+    element-wise loss without any reduction. This decorator will add weight
+    and reduction arguments to the function. The decorated function will have
+    the signature like `loss_func(pred, target, weight=None, reduction='mean',
+    avg_factor=None, **kwargs)`.
+
+    :Example:
+
+    >>> import torch
+    >>> @weighted_loss
+    >>> def l1_loss(pred, target):
+    >>>     return (pred - target).abs()
+
+    >>> pred = torch.Tensor([0, 2, 3])
+    >>> target = torch.Tensor([1, 1, 1])
+    >>> weight = torch.Tensor([1, 0, 1])
+
+    >>> l1_loss(pred, target)
+    tensor(1.3333)
+    >>> l1_loss(pred, target, weight)
+    tensor(1.)
+    >>> l1_loss(pred, target, reduction='none')
+    tensor([1., 1., 2.])
+    >>> l1_loss(pred, target, weight, avg_factor=2)
+    tensor(1.5000)
+    """
+
     @functools.wraps(loss_func)
     def wrapper(pred,
                 target,
@@ -54,22 +95,4 @@ def weighted_loss(loss_func):
         loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
         return loss
 
-@weighted_loss
-def smooth_l1_loss(pred, target, beta=1.0):
-    """Smooth L1 loss.
-
-    Args:
-        pred (torch.Tensor): The prediction.
-        target (torch.Tensor): The learning target of the prediction.
-        beta (float, optional): The threshold in the piecewise function.
-            Defaults to 1.0.
-
-    Returns:
-        torch.Tensor: Calculated loss
-    """
-    assert beta > 0
-    assert pred.size() == target.size() and target.numel() > 0
-    diff = torch.abs(pred - target)
-    loss = torch.where(diff < beta, 0.5 * diff * diff / beta,
-                       diff - 0.5 * beta)
-    return loss
+    return wrapper

@@ -77,10 +77,12 @@ class ssd(vgg16):
     def forward(self, x):
         outs = []
         for i, layer in enumerate(self.features):
+            #print(layer)
             x = layer(x)
             if i in self.out_feature_indices:
                 outs.append(x)
         for i, layer in enumerate(self.extra):
+
             x = nn.functional.relu(layer(x),inplace=True)
             if i % 2 == 1:
                 outs.append(x)

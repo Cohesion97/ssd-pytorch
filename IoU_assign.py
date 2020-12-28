@@ -13,6 +13,8 @@ class IoU_assigner(object):
         row = gt_bboxes.size(-2)
         col = anchors.size(-2)
 
+        if row*col==0:
+            return gt_bboxes.new(gt_bboxes.shape[:-2] + (row, col))
         gt_area = (gt_bboxes[...,2] - gt_bboxes[...,0]) * (gt_bboxes[...,3] - gt_bboxes[...,1])
         anchor_area = (anchors[...,2] - anchors[...,0]) * (anchors[...,3] - anchors[...,1])
 
@@ -22,8 +24,9 @@ class IoU_assigner(object):
         cut = (rb - lt).clamp(min=0)
         overlap = cut[...,0] * cut[...,1]
 
-        union = gt_area + anchor_area - overlap
-        union = torch.max(union, self.eps)
+        union = gt_area[..., None] + anchor_area[...,None,:] - overlap
+        eps = union.new_tensor([self.eps])
+        union = torch.max(union, eps)
         return overlap / union
 
 
@@ -60,7 +63,7 @@ class IoU_assigner(object):
 
         for i in range(num_gt):
             if gt_max_over[i]>self.pos_iou_thr:
-                max_iou_idx = IoU[i:,]==gt_max_over[i]
+                max_iou_idx = IoU[i, :]==gt_max_over[i]
                 assign_gt_idx[max_iou_idx] = i+1
         if gt_labels is not None:
             assign_labels = IoU.new_full((num_anchor, ), -1, dtype=torch.long)

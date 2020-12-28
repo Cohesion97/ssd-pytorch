@@ -31,6 +31,8 @@ class SSD_DET(nn.Module):
 
     def forward_train(self, x, gt_bboxes, gt_labels, batch_size):
         out = self(x)
-        loss_input = out + (gt_bboxes, gt_labels, batch_size)
+        loss_input = out + (gt_bboxes, gt_labels, )
         losses = self.header.loss(*loss_input)
         return losses
+
+    def loss_cal(self, ):

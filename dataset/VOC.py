@@ -14,7 +14,11 @@ class Compose(object):
 
     def __call__(self, img, target=None):
         for t in self.transforms:
+            # print(t)
             img, target = t(img, target)
+            # print(img)
+            # print(target)
+        #from IPython import embed;embed()
         return img, target
 
 class VOC(Dataset):
@@ -29,10 +33,12 @@ class VOC(Dataset):
                  use_set = 'train',
                  transforms = Compose([PhotometricDistort(),
                                expand(),
+                               MinIoURandomCrop(),
                                resize(),
                                normalize(),
                                flip_random(),
-                               MinIoURandomCrop()]),
+                               DefualtFormat(),
+                               ]),
                  to_rgb = True):
         self.datase_path =dataset_path
         self.use_set = use_set
@@ -58,6 +64,7 @@ class VOC(Dataset):
                          labels: np.int64)
         """
         img_id = self.ids[idx]
+        #from IPython import embed;embed()
         xml_name = self.anno_dir % img_id
         jpg_name = self.jpg_dir % img_id
 
@@ -66,14 +73,13 @@ class VOC(Dataset):
         h, w, c = img.shape
 
         anno = self.get_anno(xml_name)
-
+        # print('anno:', anno)
+        # print('img_id:',img_id)
         if self.transforms is not None:
             img, anno = self.transforms(img, anno)
         bboxes = anno[0]
         labels = anno[1]
 
-        if self.to_rgb:
-            img = img[:,:,(2,1,0)]
 
         return torch.from_numpy(img), (torch.from_numpy(bboxes), torch.from_numpy(labels))
 
