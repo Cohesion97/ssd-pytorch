@@ -30,7 +30,7 @@ class VOC(Dataset):
 
     def __init__(self,
                  dataset_path,
-                 use_set = 'train',
+                 use_set = 'trainval',
                  transforms = Compose([PhotometricDistort(),
                                expand(),
                                MinIoURandomCrop(),
@@ -110,3 +110,15 @@ class VOC(Dataset):
             labels = np.zeros((0,))
 
         return (np.array(bboxes), np.array(labels))
+
+    def evaluate(self, results, iou_thr=0.5, ):
+        """
+        evaluate map
+        :param results: list[cla_scores, loc_scores, gt_bboxes, gt_labels]
+                        cla_scores: list[Tensor] (B, num_anchor*num_classes+1, h, w)
+                        loc_results: list[Tensor] (B, num_anchor*4, h, w)
+                        gt_bboxes: list[Tensor]
+                        gt_labels: list[Tensor]
+        :return:
+        """
+        pass

@@ -103,6 +103,7 @@ class ssd_header(nn.Module):
         self.base_anchors = self.gen_anchor_single_img()
         self.num_anchors = [len(num_anchor) for num_anchor in self.base_anchors ]
         #from IPython import embed;embed()
+        #self.multi_level_anchors = self.grid_anchors()
 
         cla_convs = []
         loc_convs = []
@@ -361,8 +362,20 @@ class ssd_header(nn.Module):
         loss_bbox = smooth_l1_loss(bbox_preds, bbox_targets, avg_factor=num_total_samples)
         return loss_cla, loss_bbox
 
-
-
+    def get_bboxes(self, cla_scores, bbox_preds, with_nms=True):
+        """
+        Turn model ouputs to labeled bboxes
+        :param cla_scores: list[Tensor] (B, num_anchor*num_classes+1, h, w)
+        :param loc_results: list[Tensor] (B, num_anchor*4, h, w)
+        :param with_nms:
+        :return:
+        """
+        num_levels = len(cla_scores)
+        device = cla_scores[0].device
+        multi_level_anchors = self.grid_anchors()
+        batchsize = cla_scores[0].shape[0]
+        result = []
+        for i in range(len(batchsize)):
 
 
 

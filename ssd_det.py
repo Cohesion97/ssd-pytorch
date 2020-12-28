@@ -37,3 +37,5 @@ class SSD_DET(nn.Module):
 
     def loss_cal(self, cla_scores, loc_results, gt_bboxes, gt_labels,):
         return self.header.loss(cla_scores, loc_results, gt_bboxes, gt_labels)
+
+
