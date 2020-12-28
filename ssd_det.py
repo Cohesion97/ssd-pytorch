@@ -29,10 +29,11 @@ class SSD_DET(nn.Module):
 
         return self.header(x)
 
-    def forward_train(self, x, gt_bboxes, gt_labels, batch_size):
+    def forward_train(self, x, gt_bboxes, gt_labels, ):
         out = self(x)
         loss_input = out + (gt_bboxes, gt_labels, )
         losses = self.header.loss(*loss_input)
         return losses
 
-    def loss_cal(self, ):
+    def loss_cal(self, cla_scores, loc_results, gt_bboxes, gt_labels,):
+        return self.header.loss(cla_scores, loc_results, gt_bboxes, gt_labels)

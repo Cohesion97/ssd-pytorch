@@ -300,7 +300,7 @@ class ssd_header(nn.Module):
         :return:
         """
         multi_level_anchors = self.grid_anchors() # list[Tensor: num_levels, featmap_size, 4]
-        batch_size =  cla_scores[0].shape[0]
+        batch_size = cla_scores[0].shape[0]
         anchors_list =[multi_level_anchors for _ in range(batch_size)]
 
         (labels_list, bboxes_target_list, num_pos_total, num_neg_total) = self.match_(
