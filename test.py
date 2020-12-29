@@ -35,7 +35,7 @@ def load_model_optimizer_checkpoint(model, optimizer, checkpoint, map_location='
 
 dataset_root = '/workspace/data/VOC2007'
 checkpoint = 'workdirs/checkpoint.pth'
-batch_size = 40
+batch_size = 60
 resume = True
 save_folder = 'workdirs'
 device='cuda:0'
@@ -51,20 +51,31 @@ model = SSD_DET(20, pretrained='vgg16_caffe-292e1171.pth')
 model = model.to(device)
 model.eval()
 if resume:
-    load_model_optimizer_checkpoint(model,None,'checkpoint.pth')
+    load_model_optimizer_checkpoint(model,None,'workdirs/checkpoint384.pth')
 
 # test
-filename = os.path.join(save_folder,'test1.txt')
-num_images = len(dataset)
-results = []
-for img, targets in dataloader:
-    with torch.no_grad():
-        img = img.to(device)
-        gt_bboxes = [gt[0].to(device) for gt in targets]
-        gt_labels = [gt[1].to(device) for gt in targets]
-
-        cla, loc = model(img)
-    batch_size = len(cla)
-    results.append((cla, loc, gt_bboxes, gt_labels))
-print(dataset.evaluate(results))
+# filename = os.path.join(save_folder,'test1.txt')
+# num_images = len(dataset)
+# results = []
+# img_infos_list = []
+# for img, targets, img_infos in tqdm(dataloader):
+#     with torch.no_grad():
+#         img = img.to(device)
+#
+#         gt_bboxes = [gt[0].to(device) for gt in targets]
+#         gt_labels = [gt[1].to(device) for gt in targets]
+#         default_gt_bboxes = [img_info['default_gt_bboxes'] for img_info in img_infos]
+#         default_gt_labels = [img_info['default_gt_labels'] for img_info in img_infos]
+#         bbox_results = model.simple_test(img, img_infos, rescale=True)
+#         results.append(bbox_results)
+#         img_infos_list.append(img_infos)
+# import pickle
+# data = {'result':results,'img_info':img_infos_list}
+# with open('data.pkl','wb') as p:
+#     pickle.dump(data,p)
+# print('dump done')
+import pickle
+with open('data.pkl','rb') as p:
+    data = pickle.load(p)
+print(dataset.evaluate_map(data['result'], data['img_info']))
 from IPython import embed;embed()

@@ -100,7 +100,7 @@ for epoch in iter:
     if epoch in [256, 320,]:
         step += 1
         adjust_learning_rate(optimizer,0.1,step,lr=4e-3)
-    for images, targets in dataloader:
+    for images, targets, img_infos in dataloader:
         images = images.to(local_rank)
 
         gt_bboxes = [gt[0].to(local_rank) for gt in targets]

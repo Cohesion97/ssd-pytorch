@@ -18,8 +18,8 @@ class IoU_assigner(object):
         gt_area = (gt_bboxes[...,2] - gt_bboxes[...,0]) * (gt_bboxes[...,3] - gt_bboxes[...,1])
         anchor_area = (anchors[...,2] - anchors[...,0]) * (anchors[...,3] - anchors[...,1])
 
-        lt = torch.max(gt_bboxes[:,None,:2], anchors[None,:,:2]) # [row, col, 2]
-        rb = torch.max(gt_bboxes[:,None,2:], anchors[None,:,2:])
+        lt = torch.max(gt_bboxes[...,:,None,:2], anchors[...,None,:,:2]) # [row, col, 2]
+        rb = torch.max(gt_bboxes[...,:,None,2:], anchors[...,None,:,2:])
 
         cut = (rb - lt).clamp(min=0)
         overlap = cut[...,0] * cut[...,1]

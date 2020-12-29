@@ -9,7 +9,7 @@ class resize(object):
         self.resize_size = resize_size
         self.keep_ratio = keep_ratio
 
-    def __call__(self, img, target=None):
+    def __call__(self, img, target, img_info):
         keep_ratio = self.keep_ratio
         resize_size = self.resize_size
         if not keep_ratio:
@@ -22,7 +22,8 @@ class resize(object):
             bboxes = bboxes * scale_factor
             bboxes[:, 0::2] = np.clip(bboxes[:,0::2], 0, resize_size[0]) # width
             bboxes[:, 1::2] = np.clip(bboxes[:,1::2], 0, resize_size[1]) # height
-        return img, (bboxes, target[1])
+            img_info['scale_factor'] = scale_factor
+        return img, (bboxes, target[1]), img_info
 
 class PhotometricDistort(object):
     def __init__(self,delta=32,
@@ -34,7 +35,7 @@ class PhotometricDistort(object):
         self.saturation_range = saturation_range
         self.hue_delta = hue_delta
 
-    def __call__(self, img, target):
+    def __call__(self, img, target, img_info):
 
         assert self.delta>=0.
         assert self.delta<=255.0
@@ -73,7 +74,7 @@ class PhotometricDistort(object):
                                        self.contrast_range[1])
                 img *=alpha
 
-        return img, target
+        return img, target,img_info
 
 class expand(object):
     def __init__(self,mean=(123.675, 116.28, 103.53),
@@ -83,7 +84,7 @@ class expand(object):
         self.expand_ratio = expand_ratio
         self.mean = mean
 
-    def __call__(self, img, target = None):
+    def __call__(self, img, target, img_info):
         if random.randint(2):
             return img, target
         if self.to_rgb:
@@ -100,7 +101,7 @@ class expand(object):
         bboxes[:,0::2] += left
         bboxes[:,1::2] += top
 
-        return ex_img, (bboxes, target[1])
+        return ex_img, (bboxes, target[1]), img_info
 
 class normalize(object):
     def __init__(self,mean=[123.675, 116.28, 103.53],
@@ -110,7 +111,7 @@ class normalize(object):
         self.std = std
         self.to_rgb = to_rgb
 
-    def __call__(self, img, target=None):
+    def __call__(self, img, target=None, img_info=None):
         img = img.copy().astype(np.float32)
         mean = np.float64(np.array(self.mean,dtype=np.float32).reshape(1,-1))
         std = 1 / np.float64(np.array(self.std, dtype=np.float32).reshape(1, -1))
@@ -118,14 +119,14 @@ class normalize(object):
             cv2.cvtColor(img, cv2.COLOR_BGR2RGB, img)
         cv2.subtract(img, mean, img)  # inplace
         cv2.multiply(img, std, img)
-        return img, target
+        return img, target, img_info
 
 class flip_random(object):
     def __init__(self, flip_ratio=0.5, direction='horizontal'):
         self.flip_ratio = flip_ratio
         self.direction = direction
 
-    def __call__(self, img, target=None):
+    def __call__(self, img, target=None, img_info=None):
         direction = self.direction
         flip_ratio = self.flip_ratio
         assert direction in ['horizontal', 'vertical', 'diagonal']
@@ -155,9 +156,9 @@ class flip_random(object):
                 flipped[..., 1::4] = h - bboxes[..., 3::4]
                 flipped[..., 2::4] = w - bboxes[..., 0::4]
                 flipped[..., 3::4] = h - bboxes[..., 1::4]
-            return img, (bboxes, target[1])
+            return img, (bboxes, target[1]), img_info
         else:
-            return img, target
+            return img, target, img_info
 
 class MinIoURandomCrop(object):
     def __init__(self, min_ious=(0.1, 0.3, 0.5, 0.7, 0.9),
@@ -167,7 +168,7 @@ class MinIoURandomCrop(object):
         self.min_crop_size = min_crop_size
         self.bbox_clip_border = bbox_clip_border
 
-    def __call__(self, img, target=None):
+    def __call__(self, img, target=None, img_info=None):
         min_ious = self.min_ious
         min_crop_size = self.min_crop_size
         bbox_clip_border = self.bbox_clip_border
@@ -179,7 +180,7 @@ class MinIoURandomCrop(object):
         while True:
             mode = random.choice(iou_select)
             if mode == 1:
-                return img, target
+                return img, target, img_info
 
             min_iou = mode
             for i in range(50):
@@ -218,11 +219,11 @@ class MinIoURandomCrop(object):
                     bboxes_copy -= np.tile(patch[:2], 2)
                     img = img[patch[1]:patch[3],patch[0]:patch[2]]
 
-                    return img, (bboxes_copy, labels_copy)
+                    return img, (bboxes_copy, labels_copy), img_info
 
 class DefualtFormat(object):
-    def __call__(self, img, target):
+    def __call__(self, img, target, img_info):
         # h,w,c->c,h,w
 
         img = np.ascontiguousarray(img.transpose(2, 0, 1))
-        return img, target
+        return img, target, img_info
