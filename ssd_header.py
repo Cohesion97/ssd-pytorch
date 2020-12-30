@@ -166,7 +166,7 @@ class ssd_header(nn.Module):
                                                           self.gen_scales[i]))
         return mulit_feat
 
-    def grid_anchors(self,clamp=False,device='cuda'):
+    def grid_anchors(self,clamp=True,device='cuda'):
         """
         :argument:
             self.base_anchors: List[Tensor]

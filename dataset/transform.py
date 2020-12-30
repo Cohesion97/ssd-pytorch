@@ -86,7 +86,7 @@ class expand(object):
 
     def __call__(self, img, target, img_info):
         if random.randint(2):
-            return img, target
+            return img, target, img_info
         if self.to_rgb:
             mean = self.mean[::-1]
         h,w,c = img.shape
@@ -105,7 +105,7 @@ class expand(object):
 
 class normalize(object):
     def __init__(self,mean=[123.675, 116.28, 103.53],
-              std=[1,1,1],
+              std=[58.395, 57.12, 57.375],
               to_rgb=True):
         self.mean = mean
         self.std = std

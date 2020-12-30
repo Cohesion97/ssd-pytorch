@@ -61,8 +61,8 @@ device = torch.device("cuda", local_rank)
 
 dataset_root = '/workspace/data/VOC2007'
 checkpoint = 'workdirs/checkpoint.pth'
-batch_size = 40
-total_epoch = 384
+batch_size = 32
+total_epoch = 240
 resume = 0
 dataset = VOC(dataset_root)
 train_sample = torch.utils.data.distributed.DistributedSampler(dataset)
@@ -79,7 +79,7 @@ model = _DistDataParallel(model, device_ids=[local_rank], output_device=local_ra
 # model = model.cuda()
 # model = _DataParallel(model,device_ids=[0,1,2,3],output_device=0)
 print('DDP done')
-optimizer = optim.SGD(model.parameters(), lr=4e-3, momentum=0.9,
+optimizer = optim.SGD(model.parameters(), lr=2e-3, momentum=0.9,
                           weight_decay=5e-4)
 if resume:
     load_model_optimizer_checkpoint(None, optimizer, checkpoint=checkpoint)
@@ -91,15 +91,15 @@ model.train()
 iter = tqdm(range(total_epoch))
 # batch_iterator = iter(dataloader)
 step = 0
-
+total_loss = []
 for epoch in iter:
     dataloader.sampler.set_epoch(epoch)
-    if dist.get_rank() == 0 and epoch % 127==0 and epoch != 0:
+    if dist.get_rank() == 0 and epoch % 80==0 and epoch != 0:
         save_checkpoint(model, optimizer, epoch, checkpoint)
 
-    if epoch in [256, 320,]:
+    if epoch in [160, 200,]:
         step += 1
-        adjust_learning_rate(optimizer,0.1,step,lr=4e-3)
+        adjust_learning_rate(optimizer,0.1,step,lr=2e-3)
     for images, targets, img_infos in dataloader:
         images = images.to(local_rank)
 
@@ -117,6 +117,10 @@ for epoch in iter:
         loss.backward()
         optimizer.step()
         iter.desc = "loss = %0.3f" % loss
+        total_loss.append(loss)
+import pickle
+with open('loss_ssd.pkl','wb') as file:
+    pickle.dump(total_loss, file)
 if dist.get_rank() == 0:
     save_checkpoint(model, optimizer, total_epoch, checkpoint)
 

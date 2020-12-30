@@ -77,5 +77,10 @@ if resume:
 import pickle
 with open('data.pkl','rb') as p:
     data = pickle.load(p)
-print(dataset.evaluate_map(data['result'], data['img_info']))
-from IPython import embed;embed()
+results = []
+for i in data['result']:
+    for j in i:
+        results.append(j)
+
+print(dataset.evaluate_map(results, data['img_info']))
+

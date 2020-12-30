@@ -141,12 +141,13 @@ class VOC(Dataset):
                 annotations.append(j)
         pool = Pool(nproc)
         eval_results = []
+        dataset = 'voc07'
         for i in range(num_classes):
             # get gt and det bboxes of this class
             cls_dets, cls_gts, cls_gts_ignore = get_cls_results(
                 results, annotations, i)
             # choose proper function according to datasets to compute tp and fp
-
+            from IPython import embed;embed()
             tpfp_fn = tpfp_default
             if not callable(tpfp_fn):
                 raise ValueError(
@@ -188,7 +189,7 @@ class VOC(Dataset):
                 recalls = recalls[0, :]
                 precisions = precisions[0, :]
                 num_gts = num_gts.item()
-            dataset='voc07'
+
             mode = 'area' if dataset != 'voc07' else '11points'
             ap = average_precision(recalls, precisions, mode)
             eval_results.append({
@@ -347,10 +348,8 @@ def print_map_summary(mean_ap,
     if logger == 'silent':
         return
 
-    if isinstance(results[0]['ap'], np.ndarray):
-        num_scales = len(results[0]['ap'])
-    else:
-        num_scales = 1
+
+    num_scales = 1
 
     if scale_ranges is not None:
         assert len(scale_ranges) == num_scales
