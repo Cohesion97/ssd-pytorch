@@ -10,18 +10,33 @@ from .transform import *
 import logging
 from terminaltables import AsciiTable
 from multiprocessing import Pool
-
+import cv2
+C = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
+               'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse',
+               'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train',
+               'tvmonitor')
+vis_img='/tmp/pycharm_project_217/vis/'
 class Compose(object):
     def __init__(self, transforms):
         self.transforms = transforms
 
     def __call__(self, img, target=None, img_info=None):
-        for t in self.transforms:
+        for ind,t in enumerate(self.transforms):
             # print(t)
+
+            #transform vis
+            # bbox=target[0]
+            # label=target[1]
+            # write_img = img.copy()
+            # color = (0, 255, 255)
+            # for i, item in enumerate(bbox):
+            #     x1,y1,x2,y2=int(bbox[i][0]),int(bbox[i][1]),int(bbox[i][2]),int(bbox[i][3])
+            #     write_img = cv2.rectangle(write_img, (x1,y1),(x2,y2),color,thickness=1,)
+            #     write_img = cv2.putText(write_img,C[label[i]],(x1,y1),color=color,thickness=1,fontScale=1,fontFace=cv2.FONT_HERSHEY_SIMPLEX)
+            # cv2.imwrite(vis_img+img_info['id']+str(ind)+'.jpg',write_img)
+            # print('save img'+vis_img+str(ind)+'.jpg')
             img, target, img_info = t(img, target, img_info)
-            # print(img)
-            # print(target)
-        #from IPython import embed;embed()
+
         return img, target, img_info
 
 class VOC(Dataset):
@@ -90,6 +105,7 @@ class VOC(Dataset):
             img, anno, img_info = self.transforms(img, anno, img_info)
         bboxes = anno[0]
         labels = anno[1]
+        #print(img_info)
 
 
 
@@ -121,10 +137,13 @@ class VOC(Dataset):
         if not bboxes:
             bboxes = np.zeros((0,4))
             labels = np.zeros((0,))
+        else:
+            bboxes = np.array(bboxes, ndmin=2) - 1
+            labels = np.array(labels)
 
         return (np.array(bboxes), np.array(labels))
 
-    def evaluate_map(self, results, img_info_list ,iou_thr=0.45,nproc=4):
+    def evaluate_map(self, results, img_info_list ,iou_thr=0.45,nproc=1):
         """
         evaluate map
         :param results: (list[list]): [[cls1_det, cls2_det, ...], ...].
@@ -147,7 +166,7 @@ class VOC(Dataset):
             cls_dets, cls_gts, cls_gts_ignore = get_cls_results(
                 results, annotations, i)
             # choose proper function according to datasets to compute tp and fp
-            from IPython import embed;embed()
+            #from IPython import embed;embed()
             tpfp_fn = tpfp_default
             if not callable(tpfp_fn):
                 raise ValueError(
@@ -160,6 +179,7 @@ class VOC(Dataset):
                     [iou_thr for _ in range(num_imgs)],
                     [area_ranges for _ in range(num_imgs)]))
             tp, fp = tuple(zip(*tpfp))
+            #tp, fp = tpfp_fn(cls_dets,cls_gts, None, iou_thr=iou_thr)
             # calculate gt number of each scale
             # ignored gts or gts beyond the specific scale are not counted
             num_gts = np.zeros(num_scales, dtype=int)
@@ -199,7 +219,7 @@ class VOC(Dataset):
                 'precision': precisions,
                 'ap': ap
             })
-        pool.close()
+        #pool.close()
         aps = []
         for cls_result in eval_results:
             if cls_result['num_gts'] > 0:
@@ -233,6 +253,7 @@ def tpfp_default(det_bboxes,
             each array is (num_scales, m).
     """
     # an indicator of ignored gts
+    from IPython import embed;embed()
     gt_ignore_inds = np.concatenate(
         (np.zeros(gt_bboxes.shape[0], dtype=np.bool),
          np.ones(gt_bboxes_ignore.shape[0], dtype=np.bool)))

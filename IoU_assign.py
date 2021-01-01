@@ -19,7 +19,7 @@ class IoU_assigner(object):
         anchor_area = (anchors[...,2] - anchors[...,0]) * (anchors[...,3] - anchors[...,1])
 
         lt = torch.max(gt_bboxes[...,:,None,:2], anchors[...,None,:,:2]) # [row, col, 2]
-        rb = torch.max(gt_bboxes[...,:,None,2:], anchors[...,None,:,2:])
+        rb = torch.min(gt_bboxes[...,:,None,2:], anchors[...,None,:,2:])
 
         cut = (rb - lt).clamp(min=0)
         overlap = cut[...,0] * cut[...,1]
@@ -56,17 +56,16 @@ class IoU_assigner(object):
         max_over, argmax_over = IoU.max(dim=0) #[num_anchor]
         gt_max_over, gt_argmax_over = IoU.max(dim=1) #[num_gt]
 
-        assign_gt_idx[(max_over<self.neg_iou_thr)] = 0
+        assign_gt_idx[(max_over>=0) & (max_over<self.neg_iou_thr)] = 0
 
         pos_idx = max_over>=self.pos_iou_thr
         assign_gt_idx[pos_idx] = argmax_over[pos_idx] + 1 # assigned with idx+1
 
         for i in range(num_gt):
             if gt_max_over[i]>self.pos_iou_thr:
-                max_iou_idx = IoU[i, :]==gt_max_over[i]
-                assign_gt_idx[max_iou_idx] = i+1
+                assign_gt_idx[gt_argmax_over[i]] = i+1
         if gt_labels is not None:
-            assign_labels = IoU.new_full((num_anchor, ), -1, dtype=torch.long)
+            assign_labels = assign_gt_idx.new_full((num_anchor, ), -1, dtype=torch.long)
             pos_idx = torch.nonzero(assign_gt_idx>0, as_tuple=False).squeeze() # [num_pos_anchor]
             if pos_idx.numel()>0:
                 # 如果匹配的anchor中满足正样本条件的数量大于0，把其中正样本的对应位置

@@ -58,7 +58,7 @@ class ssd_header(nn.Module):
                  num_classes,
                  anchor_cfg={'strides':[8,16,32,64,100,300],
                              'ratios':[[2],[2,3],[2,3],[2,3],[2,],[2]],
-                             'scale_range':[0.15, 0.9],
+                             'scale_range':[0.2, 0.9],
                              'input_size':300},
                  neg_pos_rate=3
                  ):
@@ -72,8 +72,9 @@ class ssd_header(nn.Module):
         self.anchor_strides = self.anchor_cfg['strides']
         self.anchor_ratios = self.anchor_cfg['ratios']
         self.anchor_input_size = self.anchor_cfg['input_size']
+        self.featmap_size = [38, 19, 10, 5, 3, 1]
 
-        self.base_len = [int(0.07 * self.anchor_input_size)]
+        self.base_len = [int(0.1 * self.anchor_input_size)]
         small, big = self.anchor_cfg['scale_range']
         self.step = (big - small) / (self.num_multi_feats - 2)
         self.step_ = int(self.step * self.anchor_input_size)
@@ -94,13 +95,13 @@ class ssd_header(nn.Module):
                 )
             gen_ratio = [1.,]
             for k in self.anchor_ratios[j]:
-                gen_ratio.extend([k, 1/k])
+                gen_ratio.extend([1/k, k])
             gen_ratios.append(
                 torch.Tensor(gen_ratio)
             )
         self.gen_ratios = gen_ratios
         self.gen_scales = gen_scales
-        self.base_anchors = self.gen_anchor_single_img()
+        self.base_anchors = self.gen_base_anchors()
         self.num_anchors = [len(num_anchor) for num_anchor in self.base_anchors ]
         #from IPython import embed;embed()
         #self.multi_level_anchors = self.grid_anchors()
@@ -154,19 +155,28 @@ class ssd_header(nn.Module):
                    ]
 
         anchors = torch.stack(anchors, dim=-1)
-        index = list(range(len(ratios)+1))
-        return torch.index_select(anchors,0,torch.LongTensor(index))
+        #index = list(range(len(ratios)+1))
+        return anchors
+        #torch.index_select(anchors,0,torch.LongTensor(index))
 
-    def gen_anchor_single_img(self,device='cuda'):
+    def gen_base_anchors(self,device='cuda'):
         mulit_feat = []
         for i in range(len(self.base_len)):
-            mulit_feat.append(self.gen_anchor_single_feat(pairs(self.base_len[i]),
+            base_anchors=self.gen_anchor_single_feat(pairs(self.base_len[i]),
                                                           self.anchor_strides[i],
                                                           self.gen_ratios[i],
-                                                          self.gen_scales[i]))
+                                                          self.gen_scales[i])
+            indices = list(range(len(self.gen_ratios[i])))
+            indices.insert(1,len(indices))
+            base_anchors = torch.index_select(base_anchors.to(device), 0, torch.LongTensor(indices).to(device))
+            mulit_feat.append(base_anchors)
         return mulit_feat
 
-    def grid_anchors(self,clamp=True,device='cuda'):
+    @property
+    def num_base_anchors(self):
+        return [base_anchors.size(0) for base_anchors in self.base_anchors]
+
+    def grid_anchors(self,clamp=False,device='cuda'):
         """
         :argument:
             self.base_anchors: List[Tensor]
@@ -180,7 +190,10 @@ class ssd_header(nn.Module):
                 range(0, self.anchor_input_size, self.anchor_strides[num_levels]))).to(device)
             y = torch.from_numpy(np.array(
                 range(0, self.anchor_input_size, self.anchor_strides[num_levels]))).to(device)
-            shift_ = self.shift(x,y)
+            x_, y_ = self.shift(x,y)
+            shift = [x_, y_, x_, y_]
+            shift = torch.stack(shift, dim=1)
+            shift_=shift.type_as(self.base_anchors[num_levels].to(device))
             shift_anchors = self.base_anchors[num_levels].to(device)[None,:,:]+shift_[:,None,:]
             shift_anchors = shift_anchors.view(-1,4)
             if clamp:
@@ -194,14 +207,12 @@ class ssd_header(nn.Module):
         :param y: int, h of featmap
         :return: shift: Tensor, wh * 4
         """
-        x_ = x.repeat(len(y)).view(-1)
+        x_ = x.repeat(len(y))
         y_ = y.view(-1,1).repeat(1,len(x)).view(-1)
-        shift = [x_, y_, x_, y_]
-        shift = torch.stack(shift, dim=1)
 
-        return shift
+        return x_, y_
 
-    def match_(self, anchors_list, gt_bboxes, gt_labels, batch_size):
+    def match_(self, anchors_list, valid_flag_list, gt_bboxes, gt_labels, batch_size):
         """
         match anchors with gt_bboxes in a batch of imgs
         :param anchors_list: list[list[Tensor: num_levels, featmap_size, 4]]
@@ -211,26 +222,32 @@ class ssd_header(nn.Module):
         """
         num_anchors_level = [anchors.size(0) for anchors in anchors_list[0]]
         concat_anchor_list = []
-
+        concat_valid_flag_list = []
         for i in range(batch_size):
             concat_anchor_list.append(torch.cat(anchors_list[i])) # list[Tensor: num_total_anchors, 4]
+            concat_valid_flag_list.append(torch.cat(valid_flag_list[i]))
 
-        result = multi_apply(self.match_single_img, concat_anchor_list, gt_bboxes, gt_labels, batch_size=batch_size)
-        (all_labels, all_bbox_targets, all_pos_idx, all_neg_idx) = result
-
-        num_pos_total = sum([inds.numel() for inds in all_pos_idx])
-        num_neg_total = sum([inds.numel() for inds in all_neg_idx])
+        result = multi_apply(self.match_single_img,
+                             concat_anchor_list, concat_valid_flag_list,
+                             gt_bboxes, gt_labels, batch_size=batch_size)
+        (all_labels, all_label_weights, all_bbox_targets,
+         all_bbox_weights, all_pos_idx, all_neg_idx) = result
+        num_pos_total = sum([max(inds.numel(),1) for inds in all_pos_idx])
+        num_neg_total = sum([max(inds.numel(),1) for inds in all_neg_idx])
 
         labels_list = image_to_level(all_labels, num_anchors_level)
+        label_weights_list = image_to_level(all_label_weights, num_anchors_level)
         bboxes_target_list = image_to_level(all_bbox_targets, num_anchors_level)
+        bboxes_weights_list = image_to_level(all_bbox_weights,
+                                             num_anchors_level)
+        #from IPython import embed;embed()
+        return (labels_list, label_weights_list, bboxes_target_list, bboxes_weights_list, num_pos_total, num_neg_total)
 
-        return (labels_list, bboxes_target_list, num_pos_total, num_neg_total)
 
-
-    def match_single_img(self, anchors, gt_bboxes, gt_labels, batch_size=4):
+    def match_single_img(self, flat_anchors, valid_flags, gt_bboxes, gt_labels, batch_size=4):
         """
         match anchors with gt_bboxes in one img
-        :param anchors: Tensor: num_anchors, 4
+        :param flat_anchors: Tensor: num_anchors, 4
         :param gt_bboxes: Tensor: num_gt, 4
         :param gt_labels: Tensor: num_gt,
         :param batch_size: int
@@ -238,6 +255,8 @@ class ssd_header(nn.Module):
                 bbox_targets: Tensor: num_anchors, 4; 0 when not assigned
                 pos_idx: list:
         """
+        inside_flags = valid_flags
+        anchors = flat_anchors[inside_flags, :]
         assigner = IoU_assigner()
         # [num_anchors, ],
         assign_gt_idx, assign_label = assigner.assign(gt_bboxes, anchors, gt_labels)
@@ -246,53 +265,96 @@ class ssd_header(nn.Module):
         neg_idx = torch.nonzero(assign_gt_idx==0, as_tuple=False).squeeze(-1)
         pos_bboxs = anchors[pos_idx]
         neg_bboxs = anchors[neg_idx]
-        pos_gt = gt_bboxes[assign_gt_idx[pos_idx]-1]
+        pos_gt_bboxes = gt_bboxes[assign_gt_idx[pos_idx]-1]
 
+        num_valid_anchors = anchors.shape[0]
         bbox_targets = torch.zeros_like(anchors)
+        #只有正样本的bbox需要算loss
+        bbox_weights = torch.zeros_like(anchors)
         labels = anchors.new_full(
-            (anchors.shape[0], ), self.num_classes , dtype=torch.long) #(num_anchors, )
-
+            (num_valid_anchors, ), self.num_classes , dtype=torch.long) #(num_anchors, )
+        label_weights = anchors.new_zeros(num_valid_anchors, dtype=torch.float)
         if len(pos_idx) > 0:
-            pos_bbox_targets = self.bbox_encoder(pos_bboxs,pos_gt)
+            pos_bbox_targets = self.bbox_encoder(pos_bboxs,pos_gt_bboxes)
             bbox_targets[pos_idx, :] = pos_bbox_targets
+            bbox_weights[pos_idx, :] = 1.0
             if gt_labels is not None:
                 labels[pos_idx] = gt_labels[assign_gt_idx[pos_idx]-1]
             else:
                 labels[pos_idx] = 0
-        return (labels, bbox_targets, pos_idx, neg_idx)
+            label_weights[pos_idx] = 1.0
+        if len(neg_idx) > 0:
+            label_weights[neg_idx] = 1.0
+        return (labels, label_weights, bbox_targets, bbox_weights, pos_idx, neg_idx)
 
-    def bbox_encoder(self, anchors, gt_bboxes, mean=(0., 0., 0., 0.), std=(1., 1., 1., 1.)):
+    def bbox_encoder(self, proposals, gt, means=(0., 0., 0., 0.), stds=(0.1, 0.1, 0.2, 0.2)):
         """
 
-        :param anchors: Tensor: num_anchors, 4
-        :param gt_bboxes: Tensor: num_anchors, 4
+        :param proposals: Tensor: num_anchors, 4
+        :param gt: Tensor: num_anchors, 4
         :param mean:
         :param std:
         :return:
         """
-        anchors_centerx = 0.5*(anchors[...,0]+anchors[...,2])
-        anchors_centery = 0.5*(anchors[...,1]+anchors[...,3])
-        anchors_w = anchors[...,2]-anchors[...,0]
-        anchors_h = anchors[...,3]-anchors[...,1]
+        assert proposals.size() == gt.size()
 
-        gt_centerx = 0.5*(gt_bboxes[...,0]+gt_bboxes[...,2])
-        gt_centery = 0.5*(gt_bboxes[...,1]+gt_bboxes[...,3])
-        gt_w = gt_bboxes[...,2]-gt_bboxes[...,0]
-        gt_h = gt_bboxes[...,3]-gt_bboxes[...,1]
+        proposals = proposals.float()
+        gt = gt.float()
+        px = (proposals[..., 0] + proposals[..., 2]) * 0.5
+        py = (proposals[..., 1] + proposals[..., 3]) * 0.5
+        pw = proposals[..., 2] - proposals[..., 0]
+        ph = proposals[..., 3] - proposals[..., 1]
 
-        dx = (gt_centerx - anchors_centerx) / anchors_centerx
-        dy = (gt_centery - anchors_centery) / anchors_centery
-        dw = torch.log(gt_w / anchors_w)
-        dh = torch.log(gt_h / anchors_h)
+        gx = (gt[..., 0] + gt[..., 2]) * 0.5
+        gy = (gt[..., 1] + gt[..., 3]) * 0.5
+        gw = gt[..., 2] - gt[..., 0]
+        gh = gt[..., 3] - gt[..., 1]
 
-        d = torch.stack([dx, dy, dw, dh], dim=-1)  # [num_anchors, 4]
+        dx = (gx - px) / pw
+        dy = (gy - py) / ph
+        dw = torch.log(gw / pw)
+        dh = torch.log(gh / ph)
+        deltas = torch.stack([dx, dy, dw, dh], dim=-1)
 
-        means = d.new_tensor(mean).unsqueeze(0)
-        stds = d.new_tensor(std).unsqueeze(0)
-        d = d.sub_(means).div_(stds)
-        return d # [num_anchors, 4]
+        means = deltas.new_tensor(means).unsqueeze(0)
+        stds = deltas.new_tensor(stds).unsqueeze(0)
+        deltas = deltas.sub_(means).div_(stds)
+        return deltas # [num_anchors, 4]
 
-    def loss(self, cla_scores, loc_results, gt_bboxes, gt_labels,):
+    def valid_flags(self,device='cuda'):
+        multi_level_flags = []
+        for i in range(self.num_multi_feats):
+            anchor_stride = pairs(self.anchor_strides[i])
+            feat_h, feat_w = pairs(self.featmap_size[i])
+            h, w = pairs(self.anchor_input_size)
+            valid_feat_h = min(int(np.ceil(h / anchor_stride[1])), feat_h)
+            valid_feat_w = min(int(np.ceil(w / anchor_stride[0])), feat_w)
+            flags = self.single_level_valid_flags((feat_h, feat_w),
+                                                  (valid_feat_h, valid_feat_w),
+                                                  self.num_base_anchors[i],
+                                                  device=device)
+            multi_level_flags.append(flags)
+        return multi_level_flags
+
+    def single_level_valid_flags(self,
+                                 featmap_size,
+                                 valid_size,
+                                 num_base_anchors,
+                                 device='cuda'):
+        feat_h, feat_w = featmap_size
+        valid_h, valid_w = valid_size
+        assert valid_h <= feat_h and valid_w <= feat_w
+        valid_x = torch.zeros(feat_w, dtype=torch.bool, device=device)
+        valid_y = torch.zeros(feat_h, dtype=torch.bool, device=device)
+        valid_x[:valid_w] = 1
+        valid_y[:valid_h] = 1
+        valid_xx, valid_yy = self.shift(valid_x, valid_y)
+        valid = valid_xx & valid_yy
+        valid = valid[:, None].expand(valid.size(0),
+                                      num_base_anchors).contiguous().view(-1)
+        return valid
+
+    def loss(self, cla_scores, loc_results, gt_bboxes, gt_labels,vis_match=False):
         """
         :param cla_scores: list[Tensor] (B, num_anchor*num_classes+1, h, w)
         :param loc_results: list[Tensor] (B, num_anchor*4, h, w)
@@ -303,9 +365,16 @@ class ssd_header(nn.Module):
         multi_level_anchors = self.grid_anchors() # list[Tensor: num_levels, featmap_size, 4]
         batch_size = cla_scores[0].shape[0]
         anchors_list =[multi_level_anchors for _ in range(batch_size)]
+        valid_flag_list=[]
+        for i in range(batch_size):
+            multi_level_flags = self.valid_flags()
+            valid_flag_list.append(multi_level_flags)
 
-        (labels_list, bboxes_target_list, num_pos_total, num_neg_total) = self.match_(
-            anchors_list, gt_bboxes, gt_labels, batch_size)
+        assert gt_labels != None
+        (labels_list, labels_weight_list, bboxes_target_list,
+         bboxes_weight_list, num_pos_total, num_neg_total) = \
+            self.match_(anchors_list, valid_flag_list,gt_bboxes,
+                        gt_labels, batch_size)
         num_total_samples = num_neg_total + num_pos_total
         all_cla_scores = torch.cat([
             s.permute(0, 2, 3, 1).reshape(
@@ -317,23 +386,29 @@ class ssd_header(nn.Module):
             for b in loc_results
         ], -2)
         all_bbox_targets = torch.cat(bboxes_target_list,-2).view(batch_size,-1,4)
-
+        all_bbox_weights = torch.cat(bboxes_weight_list,-2).view(batch_size,-1,4)
         all_anchors = []
         for i in range(batch_size):
             all_anchors.append(torch.cat(anchors_list[i]))
         all_labels = torch.cat(labels_list, -1).view(batch_size, -1)
+        all_label_weights = torch.cat(labels_weight_list,-1).view(batch_size, -1)
 
+        if vis_match:
+            #return (labels_list, bboxes_target_list, num_pos_total, num_neg_total)
+            #from IPython import embed;embed()
+            a=1
         # check NaN and Inf
         assert torch.isfinite(all_cla_scores).all().item(), \
             'classification scores become infinite or NaN!'
         assert torch.isfinite(all_bbox_preds).all().item(), \
             'bbox predications become infinite or NaN!'
-
-        loss_cla, loss_bbox = multi_apply(self.loss_single_img, all_cla_scores,  all_bbox_preds,all_anchors, all_labels,
+        #from IPython import embed;embed()
+        loss_cla, loss_bbox = multi_apply(self.loss_single_img, all_cla_scores, all_bbox_preds, all_bbox_weights,
+                                          all_anchors, all_labels, all_label_weights,
                                            all_bbox_targets, num_total_samples=num_pos_total)
         return loss_cla, loss_bbox
 
-    def loss_single_img(self, cla_scores,  bbox_preds, anchors, labels,
+    def loss_single_img(self, cla_scores,  bbox_preds, bbox_weights, anchors, labels, label_weights,
                                            bbox_targets, num_total_samples):
         """
 
@@ -345,7 +420,8 @@ class ssd_header(nn.Module):
         :param num_total_samples:
         :return:
         """
-        loss_cla_all = F.cross_entropy(cla_scores, labels, reduction='none')
+
+        loss_cla_all = F.cross_entropy(cla_scores, labels, reduction='none') * label_weights
         # foreground: [0,num_class-1]; background: num_class
         pos_inds = ((labels >= 0) &
                     (labels < self.num_classes)).nonzero(as_tuple=False).reshape(-1)
@@ -359,8 +435,9 @@ class ssd_header(nn.Module):
         loss_cla_neg = topk_loss_cls_neg.sum()
         loss_cla = (loss_cla_pos + loss_cla_neg) / num_total_samples
 
-        loss_bbox = smooth_l1_loss(bbox_preds, bbox_targets, avg_factor=num_total_samples)
-        return loss_cla, loss_bbox
+        loss_bbox = smooth_l1_loss(bbox_preds, bbox_targets, bbox_weights,avg_factor=num_total_samples)
+        #from IPython import embed;embed()
+        return loss_cla[None], loss_bbox
 
 
     def get_bboxes(self, cla_scores, bbox_preds, img_infos, with_nms=True, rescale=False):
@@ -445,14 +522,14 @@ class ssd_header(nn.Module):
         if rescale:
             mlvl_bboxes /= mlvl_bboxes.new_tensor(scale_factor)
         mlvl_scores = torch.cat(mlvl_scores)
-        if True:
+        if False:
 
             # Add a dummy background class to the backend when using sigmoid
             # remind that we set FG labels to [0, num_class-1] since mmdet v2.0
             # BG cat_id: num_class
             padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
             mlvl_scores = torch.cat([mlvl_scores, padding], dim=1)
-
+        #from IPython import embed;embed()
         if with_nms:
             det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
                                                     0.02, dict(type='nms', iou_threshold=0.45),
@@ -482,7 +559,7 @@ class ssd_header(nn.Module):
         """
 
         assert pred_bboxes.size(0) == bboxes.size(0)
-        decoded_bboxes = delta2bbox(bboxes, pred_bboxes, [.0, .0, .0, .0], [1.0, 1.0, 1.0, 1.0],
+        decoded_bboxes = delta2bbox(bboxes, pred_bboxes, [.0, .0, .0, .0], [0.1, 0.1, 0.2, 0.2],
                                     max_shape, wh_ratio_clip, True)
 
         return decoded_bboxes

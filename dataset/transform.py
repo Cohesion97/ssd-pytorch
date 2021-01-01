@@ -18,10 +18,12 @@ class resize(object):
             w_scale = resize_size[0]/w
             h_scale = resize_size[1]/h
             bboxes = target[0]
+
             scale_factor = np.array([w_scale,h_scale,w_scale,h_scale],dtype=np.float32)
             bboxes = bboxes * scale_factor
             bboxes[:, 0::2] = np.clip(bboxes[:,0::2], 0, resize_size[0]) # width
             bboxes[:, 1::2] = np.clip(bboxes[:,1::2], 0, resize_size[1]) # height
+
             img_info['scale_factor'] = scale_factor
         return img, (bboxes, target[1]), img_info
 
@@ -105,7 +107,8 @@ class expand(object):
 
 class normalize(object):
     def __init__(self,mean=[123.675, 116.28, 103.53],
-              std=[58.395, 57.12, 57.375],
+              #std=[58.395, 57.12, 57.375],
+              std=[1,1,1],
               to_rgb=True):
         self.mean = mean
         self.std = std
@@ -156,7 +159,7 @@ class flip_random(object):
                 flipped[..., 1::4] = h - bboxes[..., 3::4]
                 flipped[..., 2::4] = w - bboxes[..., 0::4]
                 flipped[..., 3::4] = h - bboxes[..., 1::4]
-            return img, (bboxes, target[1]), img_info
+            return img, (flipped, target[1]), img_info
         else:
             return img, target, img_info
 
@@ -175,6 +178,7 @@ class MinIoURandomCrop(object):
         iou_select = (1,0, *min_ious)
         bboxes = target[0]
         labels = target[1]
+
 
         h, w, c = img.shape
         while True:

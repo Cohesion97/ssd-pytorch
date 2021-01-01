@@ -4,7 +4,7 @@ from .utils import weighted_loss
 
 
 @weighted_loss
-def smooth_l1_loss(pred, target, beta=1.0):
+def smooth_l1_loss(pred, target, beta=1.0 ):
     """Smooth L1 loss.
 
     Args:
