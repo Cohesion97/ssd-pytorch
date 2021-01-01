@@ -1,8 +1,9 @@
 # ssd-pytorch
 目前还是个半成品
-使用run.sh进行训练（DDP）
-使用test.py生成测试结果（pkl文件）
-使用eval.py计算mAP
+* 使用run.sh进行训练（DDP）
+* 使用test.py生成测试结果（pkl文件）
+    * nms使用mmcv提供的代码
+* 使用eval.py计算mAP
 
 ## 当前性能
 |训练集|测试集|训练集loss|mAP|
