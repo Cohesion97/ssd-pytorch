@@ -1,19 +1,8 @@
-import os
-import cv2
-import torch
-import numpy as np
-from tqdm import tqdm
-import argparse
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.utils.data as data
 from dataset.voc_detector_collate import voc_detector_co
-from ssd_det import SSD_DET
-from dataset.VOC import VOC, Compose
-from dataset.transform import *
+from model.detector.ssd_det import SSD_DET
+from dataset.VOC import VOC
 
-import torch.optim as optim
-from load_pretrained import weights_to_cpu, load_checkpoint
 from IPython import embed
 
 dataset_root = '/workspace/data/VOC2007'

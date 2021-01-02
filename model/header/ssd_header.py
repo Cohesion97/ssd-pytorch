@@ -6,6 +6,8 @@ from IoU_assign import IoU_assigner
 from functools import partial
 from six.moves import map, zip
 from nms.bbox_nms import multiclass_nms
+from .bbox import Bbox
+
 def pairs(x):
     assert type(x) != str
     return [x,x]
@@ -60,6 +62,7 @@ class ssd_header(nn.Module):
                              'ratios':[[2],[2,3],[2,3],[2,3],[2,],[2]],
                              'scale_range':[0.2, 0.9],
                              'input_size':300},
+                 bbox_cfg={'means':(0., 0., 0., 0.), 'stds':(0.1, 0.1, 0.2, 0.2)},
                  neg_pos_rate=3
                  ):
         super(ssd_header, self).__init__()
@@ -69,11 +72,13 @@ class ssd_header(nn.Module):
         self.num_multi_feats = len(self.default_inplanes)
         self.neg_pos_rate = neg_pos_rate
 
+        # anchor config
         self.anchor_strides = self.anchor_cfg['strides']
         self.anchor_ratios = self.anchor_cfg['ratios']
         self.anchor_input_size = self.anchor_cfg['input_size']
         self.featmap_size = [38, 19, 10, 5, 3, 1]
 
+        # gen anchors
         self.base_len = [int(0.1 * self.anchor_input_size)]
         small, big = self.anchor_cfg['scale_range']
         self.step = (big - small) / (self.num_multi_feats - 2)
@@ -103,9 +108,13 @@ class ssd_header(nn.Module):
         self.gen_scales = gen_scales
         self.base_anchors = self.gen_base_anchors()
         self.num_anchors = [len(num_anchor) for num_anchor in self.base_anchors ]
-        #from IPython import embed;embed()
-        #self.multi_level_anchors = self.grid_anchors()
 
+        # bbox config
+        self.bbox_menas = bbox_cfg['means']
+        self.bbox_stds = bbox_cfg['stds']
+        self.bbox = Bbox(means=self.bbox_menas, stds=self.bbox_stds)
+
+        # forward convs
         cla_convs = []
         loc_convs = []
         for i in range(len(self.default_inplanes)):
@@ -118,8 +127,9 @@ class ssd_header(nn.Module):
         self.loc_convs = nn.ModuleList(loc_convs)
         self.cla_convs = nn.ModuleList(cla_convs)
 
-        #from IPython import embed;embed()
-
+    @property
+    def num_base_anchors(self):
+        return [base_anchors.size(0) for base_anchors in self.base_anchors]
 
     def forward(self,feats):
         cla_scores = []
@@ -155,9 +165,8 @@ class ssd_header(nn.Module):
                    ]
 
         anchors = torch.stack(anchors, dim=-1)
-        #index = list(range(len(ratios)+1))
+
         return anchors
-        #torch.index_select(anchors,0,torch.LongTensor(index))
 
     def gen_base_anchors(self,device='cuda'):
         mulit_feat = []
@@ -171,10 +180,6 @@ class ssd_header(nn.Module):
             base_anchors = torch.index_select(base_anchors.to(device), 0, torch.LongTensor(indices).to(device))
             mulit_feat.append(base_anchors)
         return mulit_feat
-
-    @property
-    def num_base_anchors(self):
-        return [base_anchors.size(0) for base_anchors in self.base_anchors]
 
     def grid_anchors(self,clamp=False,device='cuda'):
         """
@@ -240,9 +245,7 @@ class ssd_header(nn.Module):
         bboxes_target_list = image_to_level(all_bbox_targets, num_anchors_level)
         bboxes_weights_list = image_to_level(all_bbox_weights,
                                              num_anchors_level)
-        #from IPython import embed;embed()
         return (labels_list, label_weights_list, bboxes_target_list, bboxes_weights_list, num_pos_total, num_neg_total)
-
 
     def match_single_img(self, flat_anchors, valid_flags, gt_bboxes, gt_labels, batch_size=4):
         """
@@ -275,7 +278,7 @@ class ssd_header(nn.Module):
             (num_valid_anchors, ), self.num_classes , dtype=torch.long) #(num_anchors, )
         label_weights = anchors.new_zeros(num_valid_anchors, dtype=torch.float)
         if len(pos_idx) > 0:
-            pos_bbox_targets = self.bbox_encoder(pos_bboxs,pos_gt_bboxes)
+            pos_bbox_targets = self.bbox.bbox_encoder(pos_bboxs,pos_gt_bboxes)
             bbox_targets[pos_idx, :] = pos_bbox_targets
             bbox_weights[pos_idx, :] = 1.0
             if gt_labels is not None:
@@ -286,40 +289,6 @@ class ssd_header(nn.Module):
         if len(neg_idx) > 0:
             label_weights[neg_idx] = 1.0
         return (labels, label_weights, bbox_targets, bbox_weights, pos_idx, neg_idx)
-
-    def bbox_encoder(self, proposals, gt, means=(0., 0., 0., 0.), stds=(0.1, 0.1, 0.2, 0.2)):
-        """
-
-        :param proposals: Tensor: num_anchors, 4
-        :param gt: Tensor: num_anchors, 4
-        :param mean:
-        :param std:
-        :return:
-        """
-        assert proposals.size() == gt.size()
-
-        proposals = proposals.float()
-        gt = gt.float()
-        px = (proposals[..., 0] + proposals[..., 2]) * 0.5
-        py = (proposals[..., 1] + proposals[..., 3]) * 0.5
-        pw = proposals[..., 2] - proposals[..., 0]
-        ph = proposals[..., 3] - proposals[..., 1]
-
-        gx = (gt[..., 0] + gt[..., 2]) * 0.5
-        gy = (gt[..., 1] + gt[..., 3]) * 0.5
-        gw = gt[..., 2] - gt[..., 0]
-        gh = gt[..., 3] - gt[..., 1]
-
-        dx = (gx - px) / pw
-        dy = (gy - py) / ph
-        dw = torch.log(gw / pw)
-        dh = torch.log(gh / ph)
-        deltas = torch.stack([dx, dy, dw, dh], dim=-1)
-
-        means = deltas.new_tensor(means).unsqueeze(0)
-        stds = deltas.new_tensor(stds).unsqueeze(0)
-        deltas = deltas.sub_(means).div_(stds)
-        return deltas # [num_anchors, 4]
 
     def valid_flags(self,device='cuda'):
         multi_level_flags = []
@@ -354,7 +323,7 @@ class ssd_header(nn.Module):
                                       num_base_anchors).contiguous().view(-1)
         return valid
 
-    def loss(self, cla_scores, loc_results, gt_bboxes, gt_labels,vis_match=False):
+    def loss(self, cla_scores, loc_results, gt_bboxes, gt_labels):
         """
         :param cla_scores: list[Tensor] (B, num_anchor*num_classes+1, h, w)
         :param loc_results: list[Tensor] (B, num_anchor*4, h, w)
@@ -393,16 +362,11 @@ class ssd_header(nn.Module):
         all_labels = torch.cat(labels_list, -1).view(batch_size, -1)
         all_label_weights = torch.cat(labels_weight_list,-1).view(batch_size, -1)
 
-        if vis_match:
-            #return (labels_list, bboxes_target_list, num_pos_total, num_neg_total)
-            #from IPython import embed;embed()
-            a=1
         # check NaN and Inf
         assert torch.isfinite(all_cla_scores).all().item(), \
             'classification scores become infinite or NaN!'
         assert torch.isfinite(all_bbox_preds).all().item(), \
             'bbox predications become infinite or NaN!'
-        #from IPython import embed;embed()
         loss_cla, loss_bbox = multi_apply(self.loss_single_img, all_cla_scores, all_bbox_preds, all_bbox_weights,
                                           all_anchors, all_labels, all_label_weights,
                                            all_bbox_targets, num_total_samples=num_pos_total)
@@ -436,7 +400,6 @@ class ssd_header(nn.Module):
         loss_cla = (loss_cla_pos + loss_cla_neg) / num_total_samples
 
         loss_bbox = smooth_l1_loss(bbox_preds, bbox_targets, bbox_weights,avg_factor=num_total_samples)
-        #from IPython import embed;embed()
         return loss_cla[None], loss_bbox
 
 
@@ -460,7 +423,7 @@ class ssd_header(nn.Module):
             bbox_list = [bbox_preds[level][i].detach() for level in range(multi_levels)]
             if with_nms:
                 proposal = self._get_bboxes_single(cla_list, bbox_list, multi_level_anchors,
-                                                   img_shape=(300,300),
+                                                   img_shape=pairs(self.anchor_input_size),
                                                    scale_factor=img_infos[i]['scale_factor'],
                                                    rescale=rescale, with_nms=with_nms)
             result.append(proposal)
@@ -509,27 +472,16 @@ class ssd_header(nn.Module):
             assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
             cls_score = cls_score.permute(1, 2,
                                           0).reshape(-1, self.num_classes+1)
-            if False:
-                scores = cls_score.sigmoid()
-            else:
-                scores = cls_score.softmax(-1)
+            scores = cls_score.softmax(-1)
             bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
-            bboxes = self.decode(
-                anchors, bbox_pred, max_shape=img_shape)
+            bboxes = self.bbox.bbox_decode(anchors, bbox_pred, max_shape=img_shape)
             mlvl_bboxes.append(bboxes)
             mlvl_scores.append(scores)
         mlvl_bboxes = torch.cat(mlvl_bboxes)
         if rescale:
             mlvl_bboxes /= mlvl_bboxes.new_tensor(scale_factor)
         mlvl_scores = torch.cat(mlvl_scores)
-        if False:
 
-            # Add a dummy background class to the backend when using sigmoid
-            # remind that we set FG labels to [0, num_class-1] since mmdet v2.0
-            # BG cat_id: num_class
-            padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
-            mlvl_scores = torch.cat([mlvl_scores, padding], dim=1)
-        #from IPython import embed;embed()
         if with_nms:
             det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
                                                     0.02, dict(type='nms', iou_threshold=0.45),
@@ -538,97 +490,4 @@ class ssd_header(nn.Module):
         else:
             return mlvl_bboxes, mlvl_scores
 
-
-    def decode(self,
-               bboxes,
-               pred_bboxes,
-               max_shape=None,
-               wh_ratio_clip=16 / 1000):
-        """Apply transformation `pred_bboxes` to `boxes`.
-
-        Args:
-            boxes (torch.Tensor): Basic boxes.
-            pred_bboxes (torch.Tensor): Encoded boxes with shape
-            max_shape (tuple[int], optional): Maximum shape of boxes.
-                Defaults to None.
-            wh_ratio_clip (float, optional): The allowed ratio between
-                width and height.
-
-        Returns:
-            torch.Tensor: Decoded boxes.
-        """
-
-        assert pred_bboxes.size(0) == bboxes.size(0)
-        decoded_bboxes = delta2bbox(bboxes, pred_bboxes, [.0, .0, .0, .0], [0.1, 0.1, 0.2, 0.2],
-                                    max_shape, wh_ratio_clip, True)
-
-        return decoded_bboxes
-
-def delta2bbox(rois,
-               deltas,
-               means=(0., 0., 0., 0.),
-               stds=(1., 1., 1., 1.),
-               max_shape=None,
-               wh_ratio_clip=16 / 1000,
-               clip_border=True):
-    """Apply deltas to shift/scale base boxes.
-
-    Typically the rois are anchor or proposed bounding boxes and the deltas are
-    network outputs used to shift/scale those boxes.
-    This is the inverse function of :func:`bbox2delta`.
-
-    Args:
-        rois (Tensor): Boxes to be transformed. Has shape (N, 4)
-        deltas (Tensor): Encoded offsets with respect to each roi.
-            Has shape (N, 4 * num_classes). Note N = num_anchors * W * H when
-            rois is a grid of anchors. Offset encoding follows [1]_.
-        means (Sequence[float]): Denormalizing means for delta coordinates
-        stds (Sequence[float]): Denormalizing standard deviation for delta
-            coordinates
-        max_shape (tuple[int, int]): Maximum bounds for boxes. specifies (H, W)
-        wh_ratio_clip (float): Maximum aspect ratio for boxes.
-        clip_border (bool, optional): Whether clip the objects outside the
-            border of the image. Defaults to True.
-
-    Returns:
-        Tensor: Boxes with shape (N, 4), where columns represent
-            tl_x, tl_y, br_x, br_y.
-
-    References:
-        .. [1] https://arxiv.org/abs/1311.2524
-    """
-    means = deltas.new_tensor(means).view(1, -1).repeat(1, deltas.size(1) // 4)
-    stds = deltas.new_tensor(stds).view(1, -1).repeat(1, deltas.size(1) // 4)
-    denorm_deltas = deltas * stds + means
-    dx = denorm_deltas[:, 0::4]
-    dy = denorm_deltas[:, 1::4]
-    dw = denorm_deltas[:, 2::4]
-    dh = denorm_deltas[:, 3::4]
-    max_ratio = np.abs(np.log(wh_ratio_clip))
-    dw = dw.clamp(min=-max_ratio, max=max_ratio)
-    dh = dh.clamp(min=-max_ratio, max=max_ratio)
-    # Compute center of each roi
-    px = ((rois[:, 0] + rois[:, 2]) * 0.5).unsqueeze(1).expand_as(dx)
-    py = ((rois[:, 1] + rois[:, 3]) * 0.5).unsqueeze(1).expand_as(dy)
-    # Compute width/height of each roi
-    pw = (rois[:, 2] - rois[:, 0]).unsqueeze(1).expand_as(dw)
-    ph = (rois[:, 3] - rois[:, 1]).unsqueeze(1).expand_as(dh)
-    # Use exp(network energy) to enlarge/shrink each roi
-    gw = pw * dw.exp()
-    gh = ph * dh.exp()
-    # Use network energy to shift the center of each roi
-    gx = px + pw * dx
-    gy = py + ph * dy
-    # Convert center-xy/width/height to top-left, bottom-right
-    x1 = gx - gw * 0.5
-    y1 = gy - gh * 0.5
-    x2 = gx + gw * 0.5
-    y2 = gy + gh * 0.5
-    if clip_border and max_shape is not None:
-        x1 = x1.clamp(min=0, max=max_shape[1])
-        y1 = y1.clamp(min=0, max=max_shape[0])
-        x2 = x2.clamp(min=0, max=max_shape[1])
-        y2 = y2.clamp(min=0, max=max_shape[0])
-    bboxes = torch.stack([x1, y1, x2, y2], dim=-1).view(deltas.size())
-    return bboxes
 

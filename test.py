@@ -1,22 +1,12 @@
 import os
-import cv2
-import torch
-import numpy as np
 from tqdm import tqdm
-import argparse
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.utils.data as data
 from dataset.voc_detector_collate import voc_detector_co
-from ssd_det import SSD_DET
+from model.detector.ssd_det import SSD_DET
 from dataset.VOC import VOC, Compose
 from dataset.transform import *
-import torch.optim as optim
-from load_pretrained import weights_to_cpu, load_checkpoint
-import torch.distributed.optim as dist_optim
-import torch.backends.cudnn as cudnn
-from torch.autograd import Variable
-from Data_Parallel import _DataParallel, _DistDataParallel
+from load_pretrained import load_checkpoint
+
 
 def load_model_optimizer_checkpoint(model, optimizer, checkpoint, map_location='default', strict=False):
     if model is not None:

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from myvgg import vgg16
+from model.backbone.myvgg import vgg16
 from init_weights import kaiming_init,constant_init,normal_init,xavier_init
 from load_pretrained import load_checkpoint
 

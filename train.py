@@ -1,23 +1,14 @@
-import os
-import cv2
-import torch
 import time
-import numpy as np
-from tqdm import tqdm
 import argparse
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.utils.data as data
 from dataset.voc_detector_collate import voc_detector_co
-from ssd_det import SSD_DET
+from model.detector.ssd_det import SSD_DET
 from dataset.VOC import VOC, Compose
 from dataset.transform import *
 import torch.optim as optim
 from load_pretrained import weights_to_cpu, load_checkpoint
-import torch.distributed.optim as dist_optim
-import torch.backends.cudnn as cudnn
-from torch.autograd import Variable
-from Data_Parallel import _DataParallel, _DistDataParallel
+from Data_Parallel import _DistDataParallel
 
 def save_checkpoint(model, optimizer, epoch, filename):
     checkpoint = {'state_dict':weights_to_cpu(model.state_dict()),
@@ -99,17 +90,17 @@ batch_size = 32
 total_epoch = 240
 resume = 0
 warmup_step = 200
-dataset = VOC(dataset_root,use_set='train',
+dataset = VOC(dataset_root,use_set='trainval',
               transforms=Compose([PhotometricDistort(delta=32,
                                                      contrast_range=(0.5,1.5),
                                                      saturation_range=(0.5,1.5),
                                                      hue_delta=18),
-                               #  expand(mean=(123.675, 116.28, 103.53),
-                               #         to_rgb=True,
-                               #         expand_ratio=(1,4)),
-                               # MinIoURandomCrop(min_ious=(0.1, 0.3, 0.5, 0.7, 0.9),
-                               #                  min_crop_size=0.3,
-                               #                  bbox_clip_border=True),
+                                expand(mean=(123.675, 116.28, 103.53),
+                                       to_rgb=True,
+                                       expand_ratio=(1,4)),
+                               MinIoURandomCrop(min_ious=(0.1, 0.3, 0.5, 0.7, 0.9),
+                                                min_crop_size=0.3,
+                                                bbox_clip_border=True),
                                resize(resize_size=(300,300),
                                       keep_ratio=False),
                                normalize(mean=[123.675, 116.28, 103.53],
@@ -138,6 +129,7 @@ total_loss = []
 cla_loss = []
 loc_loss = []
 start_time = time.time()
+start_step = 0
 with open(log_filename, 'wt') as f:
     for epoch in iter:
         dataloader.sampler.set_epoch(epoch)
@@ -169,27 +161,37 @@ with open(log_filename, 'wt') as f:
             loss = loss_cla + loss_loc
             loss.backward()
             optimizer.step()
+
+            if dist.is_available() and dist.is_initialized():
+                loss_value = loss.data.clone()
+                dist.all_reduce(loss_value.div_(dist.get_world_size()))
+                loss_cla_value = loss_cla.data.clone()
+                dist.all_reduce(loss_cla_value.div_(dist.get_world_size()))
+                loss_loc_value = loss_loc.data.clone()
+                dist.all_reduce(loss_loc_value.div_(dist.get_world_size()))
+
+                cla_loss.append(loss_cla_value)
+                loc_loss.append(loss_loc_value)
+                total_loss.append(loss_value)
+
             now_lr = optimizer.param_groups[0]['lr']
 
             print_loss = get_current_time() + \
                          "[epoch:%d][%d/%d]: loss_c: %0.3f los_l: %0.3f loss: %0.3f lr: %0.3e" % \
-                         (epoch,i,len(dataloader),loss_cla ,loss_loc, loss, now_lr)
+                         (epoch,i,len(dataloader),loss_cla_value ,loss_loc_value, loss_value, now_lr)
             if epoch==0 and i==0:
                 pass
             else:
                 if dist.get_rank() == 0:
-                    cla_loss.append(loss_cla)
-                    loc_loss.append(loc_loss)
-                    total_loss.append(loss)
-
-                    if i % 10==0 :
-                        during_step = (time.time() - start_time) / 10
+                    if i % 10 == 0:
+                        avg_step = (time.time() - start_time) / (step_now - start_step)
                         rest_step = (total_epoch-epoch)*len(dataloader)-i
-                        rest_time = during_step * rest_step
+                        rest_time = avg_step * rest_step
                         print_loss = print_loss + time_to_hour(rest_time)
                         print(print_loss)
-                        f.write(print_loss)
+                        f.write(print_loss+'\n')
                         start_time = time.time()
+                        start_step = step_now
 import pickle
 with open('loss_ssd.pkl','wb') as file:
     pickle.dump(total_loss, file)
