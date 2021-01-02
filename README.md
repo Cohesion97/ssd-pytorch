@@ -6,12 +6,12 @@
 * 使用eval.py计算mAP
 
 ## 当前性能
-|训练集|测试集|训练集loss|mAP|备注|
+|训练集|训练集loss|mAP|minIoUCut|200 step warmup|
 |:---:|:---:|:---:|:---:|:---:|
-|VOC2007train|VOC2007test|4.05|45.39|with minioucut without warmup|
-|VOC2007train|VOC2007test|0.23|49.95|without minioucut with warmup|
-|VOC2007train|VOC2007test|1.5|38.85|without minioucut without warmup|
-|VOC2007train|VOC2007test|2.7|63.79|with minioucut with warmup|
+|VOC2007train|4.05|45.39| <input type="checkbox"> |<input type="checkbox"> |
+|VOC2007train|0.23|49.95|<input type="checkbox"> |<input type="checkbox"> |
+|VOC2007train|1.5|38.85|<input type="checkbox"> |<input type="checkbox"> |
+|VOC2007train|2.7|63.79|<input type="checkbox">|<input type="checkbox"> |
 
 ## 包含功能
 * data-augmentation
