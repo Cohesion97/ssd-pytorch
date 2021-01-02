@@ -8,10 +8,10 @@
 ## 当前性能
 |训练集|训练集loss|mAP|minIoUCut|200 step warmup|
 |:---:|:---:|:---:|:---:|:---:|
-|VOC2007train|4.05|45.39| <input type="checkbox"> |<input type="checkbox"> |
-|VOC2007train|0.23|49.95|<input type="checkbox"> |<input type="checkbox"> |
-|VOC2007train|1.5|38.85|<input type="checkbox"> |<input type="checkbox"> |
-|VOC2007train|2.7|63.79|<input type="checkbox">|<input type="checkbox"> |
+|VOC2007train|4.05|45.39| T |F |
+|VOC2007train|0.23|49.95|F |T |
+|VOC2007train|1.5|38.85|F |T |
+|VOC2007train|2.7|63.79|T|F |
 
 ## 包含功能
 * data-augmentation
