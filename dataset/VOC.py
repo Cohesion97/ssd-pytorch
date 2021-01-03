@@ -111,7 +111,9 @@ class VOC(Dataset):
                 continue
             label = self.cat2label[name]
             bnd_box = obj.find('bndbox')
-
+            difficult = int(obj.find('difficult').text)
+            if difficult:
+                continue
             bbox = [
                 int(float(bnd_box.find('xmin').text)),
                 int(float(bnd_box.find('ymin').text)),
