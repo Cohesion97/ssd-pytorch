@@ -1,8 +1,7 @@
-import torch
 import numpy as np
 import cv2
 from numpy import random
-from np_bbox_overlaps import bbox_overlaps
+from utils.IoU_calculate.np_bbox_overlaps import bbox_overlaps
 
 class resize(object):
     def __init__(self, resize_size=(300,300), keep_ratio=False):

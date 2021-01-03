@@ -1,5 +1,4 @@
 import torch
-from IoU_assign import IoU_assigner
 from mmcv.ops.nms import batched_nms
 def multiclass_nms(multi_bboxes,
                    multi_scores,

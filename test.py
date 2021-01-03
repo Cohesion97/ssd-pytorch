@@ -1,12 +1,13 @@
 import os
+import torch
 from tqdm import tqdm
 import torch.utils.data as data
 from dataset.voc_detector_collate import voc_detector_co
 from model.detector.ssd_det import SSD_DET
 from dataset.VOC import VOC, Compose
 from dataset.transform import *
-from load_pretrained import load_checkpoint
-
+from model.load_pretrained import load_checkpoint
+import pickle
 
 def load_model_optimizer_checkpoint(model, optimizer, checkpoint, map_location='default', strict=False):
     if model is not None:
@@ -27,7 +28,7 @@ def load_model_optimizer_checkpoint(model, optimizer, checkpoint, map_location='
         print('load optimizer checkpoint from {}'.format(checkpoint))
         optimizer.load_state_dict(checkpoint['optimizer'])
 
-
+'''
 dataset_root = '/workspace/data/VOC2007'
 checkpoint = 'workdirs/checkpoint240.pth'
 batch_size = 60
@@ -110,4 +111,4 @@ for i in range(5):
                 img = cv2.putText(img, C[j]+'{:.3f}'.format(float(det[k][-1])),(x1,y1),color=(0, 255, 255),
                                   thickness=1,fontScale=1,fontFace=cv2.FONT_HERSHEY_SIMPLEX)
     cv2.imwrite('result_vis/vis'+img_list[i]+'.jpg',img)
-
+'''

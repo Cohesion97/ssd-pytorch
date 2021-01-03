@@ -1,11 +1,11 @@
 import torch
 import torch.nn.functional as F
 from losses.smooth_l1_loss import smooth_l1_loss
-from init_weights import *
-from IoU_assign import IoU_assigner
+from model.init_weights import *
+from utils.IoU_calculate.IoU_assign import IoU_assigner
 from functools import partial
 from six.moves import map, zip
-from nms.bbox_nms import multiclass_nms
+from utils.nms.bbox_nms import multiclass_nms
 from .bbox import Bbox
 
 def pairs(x):

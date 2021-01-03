@@ -12,6 +12,7 @@
 |VOC2007train|0.23|49.95|F |T |
 |VOC2007train|1.5|38.85|F |T |
 |VOC2007train|2.7|63.79|T|F |
+|VOC2007trainval|2.38|69.66|T|T |
 
 ## 包含功能
 * data-augmentation

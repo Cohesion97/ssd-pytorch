@@ -1,6 +1,6 @@
 import torch.nn as nn
-from init_weights import kaiming_init,constant_init,normal_init
-from load_pretrained import load_checkpoint
+from model.init_weights import kaiming_init,constant_init,normal_init
+from model.load_pretrained import load_checkpoint
 import logging
 
 class vgg16(nn.Module):
