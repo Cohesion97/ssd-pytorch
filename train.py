@@ -19,6 +19,7 @@ from utils.Data_Parallel import _DistDataParallel, _DataParallel
 from utils.lr_schedule import warmup_learning_rate, adjust_learning_rate
 from utils.current_time import get_current_time, time_to_hour
 from eval import VOCMap
+from torch.utils.tensorboard import SummaryWriter
 
 def transpose(matrix):
     new_matrix = []
@@ -59,6 +60,11 @@ def train(arg, local_rank):
     batch_size=32
     checkpoint_from = '/workspace/code/ssd-pytorch/trainvalaug_checkpoint240.pth'
 
+    # tensorboardX
+
+    writer = SummaryWriter(log_dir='log')
+
+
     #dataset
     dataset_root = '/workspace/data/VOC2007'
     dataset = VOC(dataset_root, use_set='trainval',
@@ -88,12 +94,10 @@ def train(arg, local_rank):
 
     test_dataset = VOC(dataset_root, use_set='test', transforms=Compose(
         [resize(), normalize(), DefualtFormat()]))
-    #test_sample = torch.utils.data.distributed.DistributedSampler(test_dataset)
     test_dataloader = Data.DataLoader(test_dataset, batch_size=batch_size,
                                  num_workers=0,
                                  collate_fn=voc_detector_co,
                                  pin_memory=False, shuffle=True
-                                      #sampler=test_sample
                                  )
 
     #model
@@ -120,7 +124,7 @@ def train(arg, local_rank):
     start_step = start_epoch * len(dataloader)
 
     save_during_epoch = 40
-    epoch_steps = [160,220]
+    epoch_steps = [1,60,220]
     eval_period = 40
     total_epoch = 280
     warmup_step = 200
@@ -130,12 +134,13 @@ def train(arg, local_rank):
     cla_loss = []
     loc_loss = []
 
-    for epoch in range(start_epoch, total_epoch+1):
+    for epoch in range(start_epoch, total_epoch):
         model.train()
         dataloader.sampler.set_epoch(epoch)
         print_epoch = epoch + 1
-        #if dist.get_rank()==0:
-        logger.info("Epoch {}/{}".format(epoch+1, total_epoch))
+
+        logger.info('-' * 10)
+        logger.info("Epoch {}/{}".format(print_epoch, total_epoch))
         logger.info('-' * 10)
 
         model.train(True)
@@ -152,7 +157,7 @@ def train(arg, local_rank):
             with torch.no_grad():
                 gt_bboxes = [gt[0].to(local_rank) for gt in targets]
                 gt_labels = [gt[1].to(local_rank) for gt in targets]
-
+            from IPython import embed;embed()
             optimizer.zero_grad()
 
             loss_cla = 0
@@ -166,6 +171,7 @@ def train(arg, local_rank):
             loss = loss_cla + loss_loc
             loss.backward()
             optimizer.step()
+            #from IPython import embed;embed()
 
             # count avg loss
             if dist.is_available() and dist.is_initialized():
@@ -184,6 +190,9 @@ def train(arg, local_rank):
                     epoch_loss += loss_value
                     epoch_loc += loss_loc_value
                     epoch_cla += loss_cla_value
+                s2 = torch.rand(1)
+
+
 
             if print_step % 10 == 0:
                 avg_step = (time.time() - start_time) / (step_now - start_step)
@@ -198,26 +207,29 @@ def train(arg, local_rank):
                 start_time = time.time()
                 start_step = step_now
 
-            if print_epoch in epoch_steps:
-                scheduler.step()
-                logger.info('sum_iter {}'.format(epoch_steps))
+                writer.add_scalars('train', {'cla':loss_cla_value.item(),'loc':loss_loc_value.item()}, step_now)
+
+
+        if print_epoch in epoch_steps and dist.get_rank()==0:
+            scheduler.step()
+            logger.info('step epoch {}'.format(print_epoch))
 
         logger.info('epoch {} loss_cla: {:.4f}, loss_loc: {:.4f} loss: {:.4f}'.format
                 (print_epoch, epoch_cla.item()/(len(dataloader)),
                  epoch_loc.item()/(len(dataloader)), epoch_loss.item()/(len(dataloader))))
 
-        if dist.get_rank() == 0 and print_epoch % save_during_epoch == 0 :#and epoch != 0:
-            save_checkpoint(model, optimizer, epoch, checkpoint_prefix)
+        if dist.get_rank() == 0 and print_epoch % save_during_epoch == 0 :
+            save_checkpoint(model, optimizer, print_epoch, checkpoint_prefix)
         dist.barrier()
 
         if print_epoch % eval_period == 0:
             logger.info('start eval')
             model.eval()
             if dist.get_rank()==0:
-                all_boxes, img_list = test_(model,test_dataloader,epoch,local_rank)
+                all_boxes, img_list = test_(model,test_dataloader,print_epoch,local_rank)
                 ap = VOCMap('/workspace/data/', 21, num_images=len(test_dataset))
                 ap(all_boxes, img_list)
-            dist.barrier()
+            #dist.barrier()
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -230,7 +242,7 @@ def main():
     args = parse_args()
 
     #dist training setting
-    dist.init_process_group(backend='gloo')
+    dist.init_process_group(backend='gloo',)
     local_rank = torch.distributed.get_rank()
     torch.cuda.set_device(local_rank)
 

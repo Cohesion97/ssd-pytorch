@@ -12,25 +12,6 @@ def pairs(x):
     assert type(x) != str
     return [x,x]
 
-def image_to_level(target, num_anchors_level):
-    """
-    Turn [anchor_img0, anchor_img1..] to [anchor_level0, anchor_level2..]
-         List length=batch size           List length=level length
-         (num_anchors,4)                  (batch_size, num_level_anchors, 4)
-    :param target:
-    :param num_anchors_lever:
-    :return:
-    """
-    target = torch.stack(target, 0)
-    level_targets = []
-    start = 0
-    for n in num_anchors_level:
-        end = start + n
-        # level_targets.append(target[:, start:end].squeeze(0))
-        level_targets.append(target[:, start:end])
-        start = end
-    return level_targets
-
 def multi_apply(func, *args, **kwargs):
     """Apply function to a list of arguments.
 
@@ -52,6 +33,25 @@ def multi_apply(func, *args, **kwargs):
     map_results = map(pfunc, *args)
     return tuple(map(list, zip(*map_results))) #转置矩阵后划分
 
+def image_to_level(target, num_anchors_level):
+    """
+    Turn [anchor_img0, anchor_img1..] to [anchor_level0, anchor_level2..]
+         List length=batch size           List length=level length
+         (num_anchors,4)                  (batch_size, num_level_anchors, 4)
+    :param target:
+    :param num_anchors_lever:
+    :return:
+    """
+    target = torch.stack(target, 0)
+    level_targets = []
+    start = 0
+    for n in num_anchors_level:
+        end = start + n
+        # level_targets.append(target[:, start:end].squeeze(0))
+        level_targets.append(target[:, start:end])
+        start = end
+    return level_targets
+
 class ssd_header(nn.Module):
 
     default_inplanes = [512, 1024, 512,256,256,256]
@@ -62,7 +62,8 @@ class ssd_header(nn.Module):
                              'ratios':[[2],[2,3],[2,3],[2,3],[2,],[2]],
                              'scale_range':[0.2, 0.9],
                              'input_size':300},
-                 bbox_cfg={'means':(0., 0., 0., 0.), 'stds':(0.1, 0.1, 0.2, 0.2)},
+                 bbox_cfg={'means': (0., 0., 0., 0.), 'stds': (0.1, 0.1, 0.2, 0.2)}
+                 ,
                  neg_pos_rate=3
                  ):
         super(ssd_header, self).__init__()
@@ -362,11 +363,14 @@ class ssd_header(nn.Module):
         all_labels = torch.cat(labels_list, -1).view(batch_size, -1)
         all_label_weights = torch.cat(labels_weight_list,-1).view(batch_size, -1)
 
+
         # check NaN and Inf
         assert torch.isfinite(all_cla_scores).all().item(), \
             'classification scores become infinite or NaN!'
         assert torch.isfinite(all_bbox_preds).all().item(), \
             'bbox predications become infinite or NaN!'
+
+
         loss_cla, loss_bbox = multi_apply(self.loss_single_img, all_cla_scores, all_bbox_preds, all_bbox_weights,
                                           all_anchors, all_labels, all_label_weights,
                                            all_bbox_targets, num_total_samples=num_pos_total)
@@ -400,6 +404,7 @@ class ssd_header(nn.Module):
         loss_cla = (loss_cla_pos + loss_cla_neg) / num_total_samples
 
         loss_bbox = smooth_l1_loss(bbox_preds, bbox_targets, bbox_weights,avg_factor=num_total_samples)
+        from IPython import embed;embed()
         return loss_cla[None], loss_bbox
 
 
